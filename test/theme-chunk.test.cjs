@@ -34,6 +34,7 @@ const {
   createPadSession,
   beginNewMemoDraft,
   commitNewMemoDraft,
+  openThemeChunkEntry,
   mergePasteCards,
   movePasteCard,
   detachPasteCard,
@@ -259,6 +260,7 @@ assert.equal(draft.sourceChunkKey, bbb.key);
 assert.equal(draft.sourceBlockId, bbb.block.id);
 assert.equal(draft.seedText, "BBB 새 주제");
 assert.equal(draft.body, "BBB 새 주제");
+assert.equal(draft.stickyLabel, "세탁");
 assert.equal(session.pads.length, 1);
 assert.equal(session.activePadId, "p01");
 assert.equal(sourcePad.text, "AAA 첫 메모\n\nBBB 새 주제");
@@ -269,12 +271,13 @@ const committed = commitNewMemoDraft(session, draft);
 assert.equal(committed.ok, true);
 assert.equal(committed.padId, "p02");
 assert.notEqual(committed.session, session);
-assert.equal(committed.session.pads[0], sourcePad);
-assert.equal(committed.session.pads[0].text, "AAA 첫 메모\n\nBBB 새 주제");
-assert.equal(committed.session.activePadId, "p01");
+assert.equal(committed.session.pads[0].text, "AAA 첫 메모");
+assert.equal(committed.session.pads[0].chunkMap[bbb.key], undefined);
+assert.equal(committed.session.activePadId, "p02");
 assert.equal(committed.session.pads[1].text, "BBB 고친 문단");
-assert.deepEqual(committed.session.pads[1].chunkMap, {});
-assert.equal(committed.session.pads[1].assignedThemeLabel, null);
+assert.equal(committed.session.pads[1].assignedThemeLabel, "세탁");
+assert.equal(committed.session.pads[1].chunkMap.c01.stickyLabel, "세탁");
+assert.equal(sourcePad.text, "AAA 첫 메모\n\nBBB 새 주제");
 assert.equal(bbb.record.stickyLabel, "세탁");
 assert.equal(session.pads.length, 1);
 const second = commitNewMemoDraft(committed.session, draft);
@@ -297,7 +300,9 @@ emptyDraft.body = "";
 const emptyPad = commitNewMemoDraft(session, emptyDraft);
 assert.equal(emptyPad.ok, true);
 assert.equal(emptyPad.session.pads[1].text, "");
-assert.equal(emptyPad.session.pads[0], sourcePad);
+assert.equal(emptyPad.session.pads[0].text, "AAA 첫 메모");
+assert.equal(emptyPad.session.pads[0].chunkMap[bbb.key], undefined);
+assert.equal(session.pads[0].text, "AAA 첫 메모\n\nBBB 새 주제");
 assert.equal(session.pads.length, 1);
 
 const fpA = themeDriftFingerprint("엔진오일 갈았다.", ["세탁"]);
@@ -497,15 +502,60 @@ const rated = makeThemeChunkEvalEntry({
 });
 assert.equal(rated.falsePositive, true);
 assert.equal(rated.shouldNotSplit, null);
-rateChunkTag(rated, "집안일", "yes", "계속");
-assert.equal(rated.ratings["집안일"].verdict, "yes");
-assert.equal(rated.ratings["집안일"].note, "계속");
+rateChunkTag(rated, "child:life:집안일", "yes", "계속", "집안일");
+assert.equal(rated.ratings["child:life:집안일"].verdict, "yes");
+assert.equal(rated.ratings["child:life:집안일"].note, "계속");
+assert.equal(rated.ratings["child:life:집안일"].label, "집안일");
+assert.equal(rated.ratings["집안일"], undefined);
+assert.equal(Object.keys(rated.ratings).length, 1);
 assert.equal(rated.chipChosen, "집안일");
+rateChunkTag(rated, "parent:life", "yes", "", "개인·생활");
+rated.ratings["개인·생활"] = { verdict: "yes", note: "", label: "개인·생활" };
+rateChunkTag(rated, "parent:life", "yes", "", "개인·생활");
+assert.equal(rated.ratings["개인·생활"], undefined);
+assert.equal(rated.ratings["parent:life"].label, "개인·생활");
+assert.equal(rated.ratings["child:life:집안일"].verdict, "yes");
 assert.equal(typeof rated.ts, "string");
 setChunkShouldNotSplit(rated, true);
 assert.equal(rated.shouldNotSplit, true);
 const exportedRated = JSON.parse(toEvalJson([rated]));
 assert.equal(exportedRated[0].shouldNotSplit, true);
 assert.equal(toEvalJsonl([rated]).trim().split("\n").length, 1);
+
+const partialLog = [];
+openThemeChunkEntry(partialLog, {
+  chunk: "협의",
+  padId: "p01",
+  chunkKey: "c02",
+  proposals: [],
+  ratings: {},
+});
+openThemeChunkEntry(partialLog, {
+  chunk: "협의회",
+  padId: "p01",
+  chunkKey: "c02",
+  proposals: [],
+  ratings: {},
+});
+openThemeChunkEntry(partialLog, {
+  chunk: "협의회 물품구매",
+  padId: "p01",
+  chunkKey: "c02",
+  proposals: [{ id: "parent:event", label: "행사·협의" }],
+  ratings: { "parent:event": { verdict: "yes", note: "", label: "행사·협의" } },
+});
+assert.equal(partialLog.length, 1);
+assert.equal(partialLog[0].chunk, "협의회 물품구매");
+assert.deepEqual(Object.keys(partialLog[0].ratings), ["parent:event"]);
+openThemeChunkEntry(partialLog, {
+  chunk: "샴푸 사기",
+  padId: "p01",
+  chunkKey: "c01",
+  proposals: [],
+  ratings: { "parent:life": { verdict: "yes", note: "", label: "개인·생활" } },
+});
+assert.equal(partialLog.length, 2);
+assert.equal(partialLog[0].chunkKey, "c02");
+assert.equal(partialLog[1].chunkKey, "c01");
 
 console.log("theme-chunk.test.cjs passed");
