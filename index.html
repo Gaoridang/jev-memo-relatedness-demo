@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Memo relatedness — 41 Korean memos, write-time themes</title>
+<title>메모</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -101,8 +101,17 @@ button.chip.soft{opacity:.9}
   background:color-mix(in srgb,var(--accent) 22%,#0a100e);color:transparent;border-radius:4px
 }
 #query{
-  position:relative;z-index:1;background:transparent;caret-color:var(--text)
+  position:relative;z-index:1;background:transparent;caret-color:var(--text);min-height:280px
 }
+.chunk-ask,.chunk-heading{margin:8px 0 0;font-size:13px;line-height:1.45}
+.chunk-heading{font-weight:600}
+.chunk-heading.on{color:var(--ok)}
+details.secondary{
+  border:1px solid var(--line);border-radius:16px;padding:12px 16px;
+  background:color-mix(in srgb,var(--panel) 94%,transparent)
+}
+details.secondary summary{cursor:pointer;font-weight:600}
+details.secondary .panel{margin-top:14px}
 .theme-chips{display:flex;flex-wrap:wrap;gap:6px;min-height:34px;margin-top:8px}
 .chunk-rows{display:grid;gap:10px;margin-top:12px}
 .chunk-row{
@@ -131,69 +140,61 @@ details.fallback summary{cursor:pointer;color:var(--accent-2)}
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <h1>Memo relatedness</h1>
-    <p class="sub">While you type, each blank-line chunk gets its own theme chips underneath. Rate a tag Yes or No. <strong>새 메모로 열기</strong> appears only when that chunk clearly leaves the memo's topic. Rank related notes from a pool of <strong>41 Korean memos</strong>. No answer key.</p>
-    <p class="compare-note">Primary path is write-time chips. Theme→child accordion is only a fallback after a multi-block paste. Fixture <code>ground_truth: null</code>. m37 is a real messy dump.</p>
-  </header>
-
+  <h1>메모</h1>
   <section class="panel">
-    <div class="section">Keys</div>
-    <label for="jevKey">TypeSafe Jev key. Saved as localStorage <code>jev_api_key</code>. Never committed. Used for live theme match and Find related.</label>
-    <input id="jevKey" type="password" autocomplete="off" placeholder="paste Jev key, or leave empty for the keyword baseline" />
-    <label for="openaiKey" style="margin-top:10px">OpenAI key for inventing short theme titles (Sol / <code>gpt-5.6-sol</code>). Saved as localStorage <code>openai_api_key</code>. Never committed. Vercel may already have <code>OPENAI_API_KEY</code>.</label>
-    <input id="openaiKey" type="password" autocomplete="off" placeholder="optional; invent titles when no prior/vocab match" />
-    <div class="row">
-      <button type="button" id="saveKeysBtn">Save local keys</button>
-      <button type="button" class="ghost" id="clearKeysBtn">Clear local keys</button>
-      <span class="meta" id="keyStatus"></span>
+    <div id="padTabs" class="pad-tabs"></div>
+    <label for="query">문단 아래에 주제가 붙습니다.</label>
+    <div class="editor-shell">
+      <div id="editorHighlight" class="editor-highlight" aria-hidden="true"></div>
+      <textarea id="query" placeholder="예: 금오산 케이블카 할인 여부"></textarea>
     </div>
-    <p class="meta" id="pathStatus" style="margin-top:8px"></p>
+    <div id="chunkRows" class="chunk-rows" aria-live="polite"></div>
+    <p class="meta" id="themeMeta" style="margin-top:8px"></p>
+    <div class="row">
+      <button type="button" class="ghost" id="clearQueryBtn">Clear pad</button>
+      <button type="button" class="ghost" id="addPadBtn">+ pad</button>
+    </div>
+    <div id="errorBox" class="error" hidden></div>
+    <details id="pasteFallback" class="fallback" style="margin-top:14px" hidden>
+      <summary>붙여넣은 메모 구조 나누기 (fallback)</summary>
+      <p class="meta">Already-pasted multi-block dump. Merge / move / detach children, then confirm. Not the main write path.</p>
+      <div id="pasteThemes" class="paste-themes"></div>
+      <div class="row">
+        <button type="button" class="primary" id="confirmPasteBtn">Confirm structure</button>
+        <button type="button" class="ghost" id="dismissPasteBtn">Dismiss</button>
+      </div>
+    </details>
   </section>
 
-  <div class="grid">
-    <div class="stack">
-      <section class="panel">
-        <div class="section">Write memo · live theme chips</div>
-        <div id="padTabs" class="pad-tabs"></div>
-        <label for="query">Type or paste. The caret chunk is highlighted. Each paragraph keeps its own chips, Yes/No, and note.</label>
-        <div class="editor-shell">
-          <div id="editorHighlight" class="editor-highlight" aria-hidden="true"></div>
-          <textarea id="query" placeholder="예: 금오산 케이블카 할인 여부"></textarea>
-        </div>
-        <div id="chunkRows" class="chunk-rows" aria-live="polite"></div>
-        <p class="meta" id="themeMeta" style="margin-top:8px">Theme judge idle.</p>
-        <div class="row">
-          <button type="button" class="primary" id="findBtn">Find related</button>
-          <button type="button" class="ghost" id="clearQueryBtn">Clear pad</button>
-          <button type="button" class="ghost" id="addPadBtn">+ pad</button>
-          <span class="badge" id="methodBadge">idle</span>
-        </div>
-        <p class="meta" id="resultMeta" style="margin-top:10px">No search yet.</p>
-        <div id="errorBox" class="error" hidden></div>
-
-        <details id="pasteFallback" class="fallback" style="margin-top:14px" hidden>
-          <summary>붙여넣은 메모 구조 나누기 (fallback)</summary>
-          <p class="meta">Already-pasted multi-block dump. Merge / move / detach children, then confirm. Not the main write path.</p>
-          <div id="pasteThemes" class="paste-themes"></div>
-          <div class="row">
-            <button type="button" class="primary" id="confirmPasteBtn">Confirm structure</button>
-            <button type="button" class="ghost" id="dismissPasteBtn">Dismiss</button>
-          </div>
-        </details>
-      </section>
-
-      <section class="panel">
-        <div class="section">Ranked related memos</div>
-        <div id="results" class="results"></div>
-        <div class="row">
-          <button type="button" class="ghost" id="showAllBtn" hidden>Show all</button>
-        </div>
-        <label for="note" style="margin-top:12px">Optional note for this relatedness run</label>
-        <textarea id="note" style="min-height:72px" placeholder="What felt right or wrong about the ranking?"></textarea>
-      </section>
-    </div>
-
+  <details class="secondary">
+    <summary>도구</summary>
+    <section class="panel">
+      <div class="section">Keys</div>
+      <label for="jevKey">Jev 키. 이 브라우저에만 저장됩니다.</label>
+      <input id="jevKey" type="password" autocomplete="off" placeholder="paste Jev key, or leave empty for the keyword baseline" />
+      <label for="openaiKey" style="margin-top:10px">OpenAI 키. 이 브라우저에만 저장됩니다.</label>
+      <input id="openaiKey" type="password" autocomplete="off" placeholder="optional; invent titles when no prior/vocab match" />
+      <div class="row">
+        <button type="button" id="saveKeysBtn">Save local keys</button>
+        <button type="button" class="ghost" id="clearKeysBtn">Clear local keys</button>
+        <span class="meta" id="keyStatus"></span>
+      </div>
+      <p class="meta" id="pathStatus" style="margin-top:8px"></p>
+    </section>
+    <section class="panel">
+      <div class="section">Find related</div>
+      <div class="row">
+        <button type="button" class="primary" id="findBtn">Find related</button>
+        <span class="badge" id="methodBadge">idle</span>
+      </div>
+      <p class="meta" id="resultMeta" style="margin-top:10px">No search yet.</p>
+      <div id="results" class="results"></div>
+      <div class="row">
+        <button type="button" class="ghost" id="showAllBtn" hidden>Show all</button>
+      </div>
+      <label for="note" style="margin-top:12px">Optional note for this relatedness run</label>
+      <textarea id="note" style="min-height:72px" placeholder="What felt right or wrong about the ranking?"></textarea>
+    </section>
     <section class="panel">
       <div class="section">Pool · 41 memos · no answer key</div>
       <label for="poolSearch">Search the pool</label>
@@ -201,18 +202,17 @@ details.fallback summary{cursor:pointer;color:var(--accent-2)}
       <p class="meta" id="poolCount" style="margin:8px 0">0 / 0</p>
       <div id="pool" class="pool"></div>
     </section>
-  </div>
-
-  <section class="panel">
-    <div class="section">Eval / test log · localStorage <code>memoRelatednessEvalLog</code></div>
-    <p class="meta">Records <code>theme_chunk</code> (chunk text, proposed tags, chosen tag, Yes/No, note, should-not-split) and <code>related_run</code> (Find related + Yes/No). Export JSON or JSONL.</p>
-    <div class="row">
-      <button type="button" id="exportJsonBtn">Download JSON</button>
-      <button type="button" id="exportJsonlBtn">Download JSONL</button>
-      <button type="button" class="ghost" id="clearLogBtn">Clear log</button>
-    </div>
-    <div id="logList" class="log-list" style="margin-top:12px"></div>
-  </section>
+    <section class="panel">
+      <div class="section">Eval / test log · localStorage <code>memoRelatednessEvalLog</code></div>
+      <p class="meta">JSON 또는 JSONL로 내보냅니다.</p>
+      <div class="row">
+        <button type="button" id="exportJsonBtn">Download JSON</button>
+        <button type="button" id="exportJsonlBtn">Download JSONL</button>
+        <button type="button" class="ghost" id="clearLogBtn">Clear log</button>
+      </div>
+      <div id="logList" class="log-list" style="margin-top:12px"></div>
+    </section>
+  </details>
 </div>
 <div id="newMemoModal" class="new-memo-modal" hidden role="dialog" aria-modal="true" aria-labelledby="newMemoTitle">
   <div class="panel new-memo-panel">
@@ -228,6 +228,7 @@ details.fallback summary{cursor:pointer;color:var(--accent-2)}
     </div>
   </div>
 </div>
+<script src="/theme-offer.js"></script>
 <script src="/shared.js"></script>
 <script src="/app.js"></script>
 </body>
