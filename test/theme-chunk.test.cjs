@@ -11,8 +11,11 @@ const {
   splitBlocks,
   countNonEmptyBlocks,
   activeChunkAt,
-  inventThemeLabel,
   proposeThemesHeuristic,
+  matchFixedThemeVocab,
+  buildThemeTitleBody,
+  parseThemeTitleResponse,
+  isChunkPrefixLabel,
   buildThemeChunkRequest,
   parseThemeChunkAnswers,
   buildThemeChips,
@@ -62,19 +65,34 @@ const atEnd = activeChunkAt(trailing, trailing.length);
 assert.equal(atEnd.active.id, "b02");
 assert.equal(atEnd.active.text, "둘째 블록입니다.");
 
-assert.equal(inventThemeLabel("삼각김밥이랑 바나나우유로 저녁 때움."), "삼각김밥이랑 바나나우유로 저녁");
-assert.equal(inventThemeLabel("   "), "주제");
+const reproPhrase = "일단 집에가서 빨래를 해야함";
+const fragment = "일단 집에가서 빨래를";
 
-const fresh = proposeThemesHeuristic("삼각김밥이랑 바나나우유로 저녁 때움.", [], []);
+const fresh = proposeThemesHeuristic(reproPhrase, [], []);
 assert.equal(fresh.ok, true);
 assert.equal(fresh.method, "heuristic");
 assert.equal(fresh.drift, false);
-assert.equal(fresh.lowConfidence, true);
-assert.equal(fresh.themes[0].id, "invented");
-assert.equal(fresh.themes[0].label, "삼각김밥이랑 바나나우유로 저녁");
-assert.equal(fresh.themes[0].score, 0);
-assert.equal(fresh.confidence, 0);
-assert.ok(fresh.confidence < THEME_HEURISTIC_LOW);
+const freshLabels = buildThemeChips(fresh).map((c) => c.label);
+assert.ok(!freshLabels.includes(fragment), `chip must not be fragment ${fragment}, got ${freshLabels.join("|")}`);
+assert.ok(
+  freshLabels.includes("집안일"),
+  `repro phrase should map to vocab 집안일, got ${freshLabels.join("|")}`
+);
+assert.ok(
+  !fresh.themes.some((t) => typeof t.label === "string" && t.label.includes("일단")),
+  "heuristic themes must not use chunk-prefix invent labels"
+);
+
+const snack = proposeThemesHeuristic("삼각김밥이랑 바나나우유로 저녁 때움.", [], []);
+assert.equal(snack.ok, true);
+const snackLabels = buildThemeChips(snack).map((c) => c.label);
+assert.ok(!snackLabels.some((label) => label.includes("삼각김밥")), `got ${snackLabels.join("|")}`);
+assert.ok(
+  snackLabels.includes("기타") && snackLabels.includes("없음"),
+  `unmatched snack should only offer 기타/없음 until OpenAI invents, got ${snackLabels.join("|")}`
+);
+assert.equal(snack.needsTitle, true);
+assert.equal(snack.lowConfidence, true);
 
 const sameTheme = proposeThemesHeuristic(
   "오늘 세탁기 돌리고 건조기까지.",
@@ -84,8 +102,8 @@ const sameTheme = proposeThemesHeuristic(
 assert.equal(sameTheme.drift, false);
 assert.equal(sameTheme.lowConfidence, false);
 assert.equal(sameTheme.themes[0].label, "세탁");
-assert.equal(sameTheme.themes[0].score, 0.7583);
-assert.equal(sameTheme.confidence, 0.7583);
+assert.equal(sameTheme.needsTitle, false);
+assert.ok(sameTheme.confidence >= THEME_HEURISTIC_LOW);
 
 const drifted = proposeThemesHeuristic(
   "엔진오일 갈았다. 공임나라에서 맡김.",
@@ -94,22 +112,23 @@ const drifted = proposeThemesHeuristic(
 );
 assert.equal(drifted.drift, true);
 assert.equal(drifted.lowConfidence, true);
-assert.equal(drifted.confidence, 0);
-assert.ok(drifted.themes.some((t) => t.id === "invented" && t.label === "엔진오일 갈았다 공임나라에서"));
+assert.equal(drifted.needsTitle, true);
+assert.ok(!drifted.themes.some((t) => String(t.label || "").includes("엔진오일")));
 assert.ok(drifted.confidence < THEME_HEURISTIC_DRIFT);
 
-const lowChips = buildThemeChips(fresh);
+const lowChips = buildThemeChips(snack);
 assert.deepEqual(
   lowChips.map((c) => c.kind),
-  ["theme", "기타", "없음"]
+  ["기타", "없음"]
 );
-assert.equal(lowChips[1].label, "기타");
-assert.equal(lowChips[2].label, "없음");
+assert.equal(lowChips[0].label, "기타");
+assert.equal(lowChips[1].label, "없음");
 
 const driftChips = buildThemeChips(drifted);
 assert.equal(driftChips.some((c) => c.kind === "새메모"), true);
 assert.equal(driftChips.some((c) => c.label === "새 메모로 열기"), true);
 assert.equal(driftChips.some((c) => c.kind === "기타"), true);
+assert.ok(!driftChips.some((c) => String(c.label).includes("엔진오일")));
 
 const request = buildThemeChunkRequest("엔진오일 갈았다.", [{ id: "t1", label: "세탁" }]);
 assert.equal(request.model, JEV_MODEL);
@@ -146,11 +165,9 @@ const liveDrift = parseThemeChunkAnswers(
 assert.equal(liveDrift.ok, true);
 assert.equal(liveDrift.method, "live_jev");
 assert.equal(liveDrift.model, "jev-1.13.0");
-assert.equal(liveDrift.themes[0].id, "invented");
-assert.equal(liveDrift.themes[0].label, "엔진오일 갈았다");
-assert.equal(liveDrift.themes[0].score, 0.81);
-assert.equal(liveDrift.confidence, 0.81);
-assert.equal(liveDrift.lowConfidence, false);
+assert.equal(liveDrift.needsTitle, true);
+assert.equal(liveDrift.newScore, 0.81);
+assert.ok(!liveDrift.themes.some((t) => String(t.label || "").includes("엔진오일")));
 assert.equal(liveDrift.drift, true);
 assert.ok(liveDrift.confidence >= THEME_LIVE_LOW);
 
@@ -200,7 +217,12 @@ assert.equal(countNonEmptyBlocks(pasteText), 3);
 const workbench = proposePasteStructure(pasteText);
 assert.equal(workbench.blockCount, 3);
 assert.equal(workbench.themes.length >= 2, true);
-assert.equal(workbench.themes[0].label, "금오산 케이블카 할인");
+assert.ok(!String(workbench.themes[0].label).includes("금오산 케이블카 할인"));
+assert.ok(
+  workbench.themes[0].label === "기타" ||
+    workbench.themes[0].label === "여행" ||
+    workbench.themes[0].label.length <= 8
+);
 assert.equal(workbench.themes[0].cards[0].text, "금오산 케이블카 할인 여부");
 
 const merged = proposePasteStructure(pasteText);
@@ -237,12 +259,13 @@ assert.equal(detached.themes.length, 2);
 assert.equal(detached.themes[0].cards.length, 1);
 assert.equal(detached.themes[0].cards[0].id, "b01");
 assert.equal(detached.themes[1].id, "theme_2");
-assert.equal(detached.themes[1].label, "수건 추가");
+assert.ok(!String(detached.themes[1].label).includes("수건 추가"));
 assert.equal(detached.themes[1].cards[0].id, "b02");
 
 const confirmed = padsFromPasteStructure(workbench, 3);
 assert.equal(confirmed[0].id, "p03");
-assert.equal(confirmed[0].assignedThemeLabel, "금오산 케이블카 할인");
+assert.ok(confirmed[0].assignedThemeLabel);
+assert.ok(!String(confirmed[0].assignedThemeLabel).includes("금오산 케이블카 할인"));
 assert.equal(confirmed[0].text.includes("금오산"), true);
 
 const themeEntry = makeThemeChunkEvalEntry({
@@ -279,5 +302,30 @@ assert.equal(mixed[1].kind, "theme_chunk");
 assert.equal(mixed[1].newMemoNudge, "yes");
 const jsonl = toEvalJsonl([related, themeEntry]);
 assert.equal(jsonl.trim().split("\n").length, 2);
+
+const vocabHit = matchFixedThemeVocab("일단 집에가서 빨래를 해야함");
+assert.equal(vocabHit.label, "집안일");
+assert.ok(vocabHit.score > 0);
+
+assert.equal(isChunkPrefixLabel("일단 집에가서 빨래를", "일단 집에가서 빨래를 해야함"), true);
+assert.equal(isChunkPrefixLabel("집안일", "일단 집에가서 빨래를 해야함"), false);
+
+const titleBody = buildThemeTitleBody("엔진오일 갈았다. 공임나라에서 맡김.", ["세탁", "집안일"]);
+assert.equal(titleBody.model, "gpt-5.6-sol");
+assert.equal(titleBody.reasoning_effort, "none");
+assert.equal(titleBody.response_format.type, "json_object");
+assert.ok(titleBody.messages[0].content.includes("short theme title"));
+
+const parsedTitle = parseThemeTitleResponse({
+  choices: [{ message: { content: '{"title":"차량정비","reason":"oil change"}' } }],
+});
+assert.equal(parsedTitle.ok, true);
+assert.equal(parsedTitle.title, "차량정비");
+
+const badTitle = parseThemeTitleResponse({
+  choices: [{ message: { content: '{"title":"일단 집에가서 빨래를","reason":"x"}' } }],
+  _chunk: "일단 집에가서 빨래를 해야함",
+});
+assert.equal(badTitle.ok, false);
 
 console.log("theme-chunk.test.cjs passed");
