@@ -251,48 +251,13 @@ const THEME_LIVE_LOW = 0.45;
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_MODEL = "gpt-5.6-sol";
 
-const THEME_VOCAB = Object.freeze([
-  {
-    label: "집안일",
-    keywords: ["빨래", "세탁", "건조기", "세탁기", "청소", "설거지", "분리수거", "쓰레기", "걸레", "수건"],
-  },
-  {
-    label: "미팅",
-    keywords: ["미팅", "회의", "standup", "sync", "콜", "화상", "1:1", "인터뷰"],
-  },
-  {
-    label: "식사",
-    keywords: ["밥", "점심", "저녁", "아침", "김밥", "삼각김밥", "우유", "카페", "커피", "맛집", "배달"],
-  },
-  {
-    label: "차량",
-    keywords: ["엔진오일", "자동차", "주차", "타이어", "정비", "공임", "주유", "세차"],
-  },
-  {
-    label: "여행",
-    keywords: ["여행", "숙박", "호텔", "케이블카", "항공", "기차", "관광", "금오산"],
-  },
-  {
-    label: "운동",
-    keywords: ["운동", "헬스", "러닝", "조깅", "헬스장", "스트레칭", "땀"],
-  },
-  {
-    label: "쇼핑",
-    keywords: ["쇼핑", "구매", "주문", "쿠팡", "배송", "장보기", "할인"],
-  },
-  {
-    label: "업무",
-    keywords: ["업무", "프로젝트", "마감", "배포", "pr", "버그", "코드", "데모"],
-  },
-  {
-    label: "건강",
-    keywords: ["병원", "약", "아프", "통증", "수면", "피곤", "검진"],
-  },
-  {
-    label: "금융",
-    keywords: ["카드", "결제", "이체", "급여", "예산", "통장", "세금"],
-  },
-]);
+function readCatalogVocab() {
+  if (typeof vocabEntries === "function") return vocabEntries();
+  if (typeof module !== "undefined" && module.exports) return require("./theme-offer").vocabEntries();
+  throw new Error("theme catalog missing");
+}
+
+const THEME_VOCAB = Object.freeze(readCatalogVocab());
 
 const THEME_MATCH_INSTRUCTIONS =
   "Does this active memo chunk belong to the given theme label? True if the chunk is about that theme. False if it is a different subject.";
@@ -942,6 +907,7 @@ function emptyChunkRecord(key) {
     proposals: [],
     ratings: {},
     stickyLabel: null,
+    theme: typeof initialTheme === "function" ? initialTheme() : null,
     split: {
       kind: "none",
       legacyWouldNudge: false,
