@@ -1,6 +1,6 @@
 # Memo relatedness demo
 
-Type a memo. The page highlights the **active chunk** (the blank-line block at the caret) and shows **theme chips** under the editor. If the topic drifts, prefer **새 메모로 열기**. You can still rank related notes from a fixed pool of **41 Korean memos** and rate each suggestion Yes/No.
+Type a memo. The page highlights the **active chunk** (the blank-line block at the caret) and shows **theme chips under each chunk**. Rate a recommended tag Yes or No and leave an optional note. **새 메모로 열기** shows up only when that chunk clearly leaves the earlier topic in the same memo. A new pad starts with a clean chip row. Session theme priors can still carry labels forward. You can still rank related notes from a fixed pool of **41 Korean memos** and rate each suggestion Yes/No.
 
 This is **relatedness** and write-time theme propose, not category classification and not a scored answer key.
 
@@ -8,11 +8,12 @@ The corpus fixture is `fixtures/korean-memo-relatedness-30.json` (filename kept;
 
 ## Write-time chips (primary)
 
-1. Type or paste in the editor. After about 350ms the page finds the active chunk, highlights it, and proposes themes.
-2. Chips come from that propose. If confidence is low, chips include **기타** and **없음**.
-3. If the active chunk drifts from earlier pad themes, the page also shows **새 메모로 열기** and **이 메모에 유지**.
-4. **새 메모로 열기** moves the active chunk and its trailing empty lines onto a new pad and focuses that pad.
-5. **이 메모에 유지** logs a refused split and hides that same drift until the chunk text changes.
+1. Type or paste in the editor. After about 350ms the page proposes themes for each blank-line chunk and renders those chips under that chunk.
+2. Yes accepts a tag and keeps it on the row. No rejects it and keeps the chip on the row. An optional note is stored with the rating.
+3. A picked or rated chip stays on that row after the next propose.
+4. **새 메모로 열기** appears on a chunk only when its vocab topic conflicts with earlier chunks in the same memo, or a live Jev `new_topic` score says so and the chunk is not the same vocab. A same-topic continuation does not nudge. The old low-overlap nudge is logged as `falsePositive` so a rater can mark `shouldNotSplit`.
+5. **새 메모로 열기** moves that chunk onto a new pad. The new pad's chip, selection, and highlight start empty. `sessionThemePriors` stay.
+6. **같은 주제예요** sets `shouldNotSplit` and hides the nudge.
 
 With a TypeSafe key (`JEV_API_KEY` on Vercel and/or localStorage `jev_api_key`) the page sends `{ mode: "theme_chunk", chunk, priorThemes }` to `/api/jev` (or TypeSafe from the browser). The request is Noul per prior theme plus `new_topic` and `none_topic`. The model is the account default `jev-latest`. Failures show the real HTTP or parse error. There are no mocks.
 
@@ -59,6 +60,14 @@ Stored in `localStorage` as `memoRelatednessEvalLog`. One array. Export JSON or 
 - `inventedLabelBefore` / `inventedLabelAfter` (when a short title is invented)
 - `needsTitle`
 - `labelSource`
+- `chunkKey`
+- `ratings`: per-label `{ verdict: yes|no|null, note }`
+- `stickyLabel`
+- `splitKind` (`none` | `nudge` | `candidate`)
+- `legacyWouldNudge`
+- `falsePositive`
+- `shouldNotSplit` (`true` or `null`)
+- `ratedAt` (when a tag rating or the split flag changes)
 
 The page does not invent ground-truth scores against the corpus.
 

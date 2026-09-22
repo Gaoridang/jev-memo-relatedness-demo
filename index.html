@@ -79,11 +79,12 @@ button.chip.soft{opacity:.9}
 .memo-card{cursor:pointer;width:100%}
 .memo-card:hover{border-color:#4d655b}
 .memo-card p,.result p,.log-item p,.theme-card p{margin:6px 0 0;font-size:13px;line-height:1.45}
-.memo-head,.result-top,.log-head,.rate{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.memo-head,.result-top,.log-head{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
 .rank{color:var(--accent);font-size:12px;margin-left:6px}
 .score{font-size:12px;color:var(--text)}
 .muted{color:var(--muted)}
-.rate{margin-top:10px;font-size:12px;color:var(--muted)}
+.rate{margin-top:8px;font-size:12px;color:var(--muted);display:grid;grid-template-columns:auto auto auto;gap:8px;justify-content:start;align-items:center}
+.chunk-note{grid-column:1 / -1;width:100%;margin-top:0}
 .rate button.on.yes{border-color:#2c5c4e;color:var(--ok)}
 .rate button.on.no{border-color:#6a2f38;color:var(--bad)}
 .empty{color:var(--muted);font-size:13px;margin:0}
@@ -103,11 +104,17 @@ button.chip.soft{opacity:.9}
   position:relative;z-index:1;background:transparent;caret-color:var(--text)
 }
 .theme-chips{display:flex;flex-wrap:wrap;gap:6px;min-height:34px;margin-top:8px}
+.chunk-rows{display:grid;gap:10px;margin-top:12px}
+.chunk-row{
+  border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#101614
+}
+.chunk-row.active{border-color:#3d7a5f}
+.chunk-excerpt{margin:0;font-size:13px;line-height:1.45;white-space:pre-wrap}
+.split-flag{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:12px;color:var(--muted)}
 .nudge-bar{
   margin-top:8px;padding:10px 12px;border:1px dashed #6b5d32;border-radius:12px;
   background:#18160f;display:flex;flex-wrap:wrap;gap:8px;align-items:center
 }
-.nudge-bar[hidden]{display:none}
 details.fallback{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#0f1412}
 details.fallback summary{cursor:pointer;color:var(--accent-2)}
 .paste-themes{display:grid;gap:10px;margin-top:10px}
@@ -119,7 +126,7 @@ details.fallback summary{cursor:pointer;color:var(--accent-2)}
 <div class="wrap">
   <header>
     <h1>Memo relatedness</h1>
-    <p class="sub">While you type, the active chunk is highlighted and theme chips appear under the editor. On topic drift, prefer <strong>새 메모로 열기</strong>. Rank related notes from a pool of <strong>41 Korean memos</strong>. No answer key.</p>
+    <p class="sub">While you type, each blank-line chunk gets its own theme chips underneath. Rate a tag Yes or No. <strong>새 메모로 열기</strong> appears only when that chunk clearly leaves the memo's topic. Rank related notes from a pool of <strong>41 Korean memos</strong>. No answer key.</p>
     <p class="compare-note">Primary path is write-time chips. Theme→child accordion is only a fallback after a multi-block paste. Fixture <code>ground_truth: null</code>. m37 is a real messy dump.</p>
   </header>
 
@@ -142,17 +149,12 @@ details.fallback summary{cursor:pointer;color:var(--accent-2)}
       <section class="panel">
         <div class="section">Write memo · live theme chips</div>
         <div id="padTabs" class="pad-tabs"></div>
-        <label for="query">Type or paste. Active chunk (blank-line block at the caret) is highlighted. Chips update while typing.</label>
+        <label for="query">Type or paste. The caret chunk is highlighted. Each paragraph keeps its own chips, Yes/No, and note.</label>
         <div class="editor-shell">
           <div id="editorHighlight" class="editor-highlight" aria-hidden="true"></div>
           <textarea id="query" placeholder="예: 금오산 케이블카 할인 여부"></textarea>
         </div>
-        <div id="themeChips" class="theme-chips" aria-live="polite"></div>
-        <div id="nudgeBar" class="nudge-bar" hidden>
-          <span class="meta">주제가 갈라진 것 같습니다. 새 메모로 나누는 편을 권합니다.</span>
-          <button type="button" class="primary" id="openNewMemoBtn">새 메모로 열기</button>
-          <button type="button" class="ghost" id="stayMemoBtn">이 메모에 유지</button>
-        </div>
+        <div id="chunkRows" class="chunk-rows" aria-live="polite"></div>
         <p class="meta" id="themeMeta" style="margin-top:8px">Theme judge idle.</p>
         <div class="row">
           <button type="button" class="primary" id="findBtn">Find related</button>
@@ -196,7 +198,7 @@ details.fallback summary{cursor:pointer;color:var(--accent-2)}
 
   <section class="panel">
     <div class="section">Eval / test log · localStorage <code>memoRelatednessEvalLog</code></div>
-    <p class="meta">Records <code>theme_chunk</code> (chunk, proposals, confidence, method, chipChosen, newMemoNudge) and <code>related_run</code> (Find related + Yes/No). Export JSON or JSONL.</p>
+    <p class="meta">Records <code>theme_chunk</code> (chunk text, proposed tags, chosen tag, Yes/No, note, should-not-split) and <code>related_run</code> (Find related + Yes/No). Export JSON or JSONL.</p>
     <div class="row">
       <button type="button" id="exportJsonBtn">Download JSON</button>
       <button type="button" id="exportJsonlBtn">Download JSONL</button>

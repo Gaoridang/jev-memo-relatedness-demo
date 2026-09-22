@@ -13,10 +13,7 @@ const els = {
   padTabs: document.getElementById("padTabs"),
   query: document.getElementById("query"),
   editorHighlight: document.getElementById("editorHighlight"),
-  themeChips: document.getElementById("themeChips"),
-  nudgeBar: document.getElementById("nudgeBar"),
-  openNewMemoBtn: document.getElementById("openNewMemoBtn"),
-  stayMemoBtn: document.getElementById("stayMemoBtn"),
+  chunkRows: document.getElementById("chunkRows"),
   themeMeta: document.getElementById("themeMeta"),
   findBtn: document.getElementById("findBtn"),
   clearQueryBtn: document.getElementById("clearQueryBtn"),
@@ -49,12 +46,9 @@ let session = createPadSession({ pad: { id: "p01", text: "" } });
 let sessionThemePriors = [];
 let themeTimer = null;
 let themeSeq = 0;
-let lastThemeEntry = null;
 let currentTheme = null;
-let currentChunk = null;
 let pendingPasteCount = 0;
 let pasteState = null;
-const suppressedDrift = new Set();
 
 function loadEvalLog() {
   try {
@@ -172,6 +166,9 @@ function renderPool() {
       const pad = activePad();
       pad.text = memo.text;
       pad.caret = memo.text.length;
+      pad.assignedThemeLabel = null;
+      pad.chunkMap = {};
+      pad.chunkSeq = 0;
       loadPadIntoEditor();
       scheduleTheme();
     };
@@ -241,6 +238,16 @@ function formatScore(score) {
   return score.toFixed(3);
 }
 
+function formatTagRatings(ratings) {
+  const parts = [];
+  for (const [label, rating] of Object.entries(ratings || {})) {
+    if (!rating || (!rating.verdict && !rating.note)) continue;
+    const note = rating.note ? ` "${rating.note}"` : "";
+    parts.push(`${label} ${rating.verdict || "note"}${note}`);
+  }
+  return parts.length ? ` · ${parts.join(", ")}` : "";
+}
+
 function renderLog() {
   els.logList.innerHTML = "";
   if (!evalLog.length) {
@@ -260,7 +267,7 @@ function renderLog() {
           <span>${escapeHtml(entry.ts)}</span>
         </div>
         <p>${escapeHtml(entry.chunk || "")}</p>
-        <div class="muted">confidence ${entry.confidence == null ? "—" : entry.confidence} · chip ${escapeHtml(String(entry.chipChosen))} · nudge ${escapeHtml(String(entry.newMemoNudge))} · pad ${escapeHtml(String(entry.padId))} · chunk ${escapeHtml(String(entry.activeChunkId))}</div>
+          <div class="muted">confidence ${entry.confidence == null ? "—" : entry.confidence} · chip ${escapeHtml(String(entry.chipChosen))} · split ${escapeHtml(String(entry.splitKind || entry.newMemoNudge))} · shouldNotSplit ${escapeHtml(String(entry.shouldNotSplit))} · pad ${escapeHtml(String(entry.padId))} · ${escapeHtml(String(entry.chunkKey || entry.activeChunkId))}${escapeHtml(formatTagRatings(entry.ratings))}</div>
       `;
     } else {
       const yes = Object.values(entry.ratings || {}).filter((v) => v === "yes").length;
@@ -310,11 +317,13 @@ function syncPadFromEditor() {
 
 function loadPadIntoEditor() {
   const pad = activePad();
+  currentTheme = null;
   els.query.value = pad.text;
   const caret = Math.min(pad.caret || pad.text.length, pad.text.length);
   els.query.setSelectionRange(caret, caret);
   renderPads();
   renderHighlight();
+  renderChunkRows();
 }
 
 function renderPads() {
@@ -385,109 +394,279 @@ function priorLabels(priors) {
   return (priors || []).map((theme) => theme.label);
 }
 
-function appendThemeLog(fields) {
-  const entry = makeThemeChunkEvalEntry(fields);
-  evalLog.push(entry);
+function findChunkEntry(padId, chunkKey) {
+  return [...evalLog].reverse().find(
+    (row) => row.kind === "theme_chunk" && row.padId === padId && row.chunkKey === chunkKey
+  );
+}
+
+function upsertChunkLog(pad, record, result, extra) {
+  const split = record.split || {};
+  const fields = {
+    chunk: record.text,
+    proposals: visibleChunkTags(record),
+    confidence: result ? result.confidence : null,
+    method: result ? result.method : null,
+    chipChosen: record.stickyLabel || null,
+    newMemoNudge: extra && extra.newMemoNudge !== undefined ? extra.newMemoNudge : null,
+    padId: pad.id,
+    activeChunkId: extra && extra.blockId ? extra.blockId : record.key,
+    chunkKey: record.key,
+    model: result && result.model,
+    inventedLabelBefore: result && result.inventedLabelBefore,
+    inventedLabelAfter: result && result.inventedLabelAfter,
+    needsTitle: result && result.needsTitle,
+    labelSource: result && result.labelSource,
+    ratings: record.ratings || {},
+    stickyLabel: record.stickyLabel || null,
+    splitKind: split.kind || "none",
+    legacyWouldNudge: split.legacyWouldNudge,
+    falsePositive: split.falsePositive,
+    shouldNotSplit: split.shouldNotSplit === true ? true : null,
+  };
+  let entry = findChunkEntry(pad.id, record.key);
+  if (!entry || entry.chunk !== record.text) {
+    entry = makeThemeChunkEvalEntry(fields);
+    evalLog.push(entry);
+  } else {
+    entry.proposals = fields.proposals;
+    entry.confidence = fields.confidence;
+    entry.method = fields.method;
+    entry.model = fields.model;
+    entry.chunk = fields.chunk;
+    entry.activeChunkId = fields.activeChunkId;
+    entry.inventedLabelBefore = fields.inventedLabelBefore || null;
+    entry.inventedLabelAfter = fields.inventedLabelAfter || null;
+    entry.needsTitle = Boolean(fields.needsTitle);
+    entry.labelSource = fields.labelSource || null;
+    entry.ratings = fields.ratings;
+    entry.stickyLabel = fields.stickyLabel;
+    entry.chipChosen = fields.chipChosen;
+    entry.splitKind = fields.splitKind;
+    entry.legacyWouldNudge = fields.legacyWouldNudge;
+    entry.falsePositive = fields.falsePositive;
+    if (fields.shouldNotSplit === true) entry.shouldNotSplit = true;
+    if (fields.newMemoNudge === "yes" || fields.newMemoNudge === "no") {
+      entry.newMemoNudge = fields.newMemoNudge;
+    }
+  }
+  if (extra && extra.chipChosen !== undefined) {
+    setThemeChunkChoice(entry, extra.chipChosen, extra.newMemoNudge);
+    entry.chipChosen = extra.chipChosen;
+    entry.stickyLabel = record.stickyLabel || null;
+  }
   persistEvalLog();
-  lastThemeEntry = entry;
   renderLog();
   return entry;
 }
 
-function updateThemeLog(chipChosen, newMemoNudge) {
-  if (lastThemeEntry && lastThemeEntry.kind === "theme_chunk") {
-    const samePad = lastThemeEntry.padId === session.activePadId;
-    const sameChunk = currentChunk && lastThemeEntry.activeChunkId === currentChunk.id;
-    if (samePad && sameChunk) {
-      setThemeChunkChoice(lastThemeEntry, chipChosen, newMemoNudge);
-      persistEvalLog();
-      renderLog();
-      return lastThemeEntry;
+function rowTags(record) {
+  const tags = visibleChunkTags(record);
+  const split = record.split || {};
+  if (split.kind === "nudge" && split.shouldNotSplit !== true) {
+    tags.push({ id: "새메모", label: "새 메모로 열기", kind: "새메모", score: null });
+  }
+  return tags;
+}
+
+function renderChunkRows() {
+  const pad = activePad();
+  const caret = els.query.selectionStart || 0;
+  const loc = activeChunkAt(pad.text, caret);
+  const rows = projectChunkBoard(pad, pad.text);
+  els.chunkRows.innerHTML = "";
+  if (!rows.length) {
+    els.chunkRows.innerHTML = '<p class="empty">문단이 생기면 각 문단 아래에 태그 칩이 붙습니다.</p>';
+    return;
+  }
+  for (const row of rows) {
+    const article = document.createElement("article");
+    article.className = "chunk-row";
+    if (row.block.id === loc.active.id) article.classList.add("active");
+    const excerpt = document.createElement("p");
+    excerpt.className = "chunk-excerpt";
+    excerpt.textContent = row.block.text;
+    excerpt.onclick = () => {
+      els.query.focus();
+      const pos = Math.min(row.block.end, els.query.value.length);
+      els.query.setSelectionRange(pos, pos);
+      syncPadFromEditor();
+      renderHighlight();
+      renderChunkRows();
+    };
+    article.appendChild(excerpt);
+    const chips = document.createElement("div");
+    chips.className = "theme-chips";
+    const tags = rowTags(row.record);
+    for (const chip of tags) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "chip";
+      if (chip.kind === "새메모") btn.classList.add("drift");
+      if (chip.kind === "기타" || chip.kind === "없음") btn.classList.add("soft");
+      if (row.record.stickyLabel && chip.label === row.record.stickyLabel) btn.classList.add("on");
+      btn.textContent = chip.label;
+      btn.onclick = () => onChunkChip(row.key, chip);
+      chips.appendChild(btn);
     }
+    article.appendChild(chips);
+    for (const chip of tags) {
+      if (chip.kind === "새메모") continue;
+      const rating = (row.record.ratings && row.record.ratings[chip.label]) || {};
+      const rate = document.createElement("div");
+      rate.className = "rate";
+      const name = document.createElement("span");
+      name.textContent = chip.label;
+      const yes = document.createElement("button");
+      yes.type = "button";
+      yes.textContent = "Yes";
+      yes.className = rating.verdict === "yes" ? "on yes" : "";
+      yes.onclick = () => rateChunk(row.key, chip.label, "yes");
+      const no = document.createElement("button");
+      no.type = "button";
+      no.textContent = "No";
+      no.className = rating.verdict === "no" ? "on no" : "";
+      no.onclick = () => rateChunk(row.key, chip.label, "no");
+      const note = document.createElement("input");
+      note.className = "chunk-note";
+      note.type = "text";
+      note.placeholder = "optional note";
+      note.value = rating.note || "";
+      note.oninput = () => noteChunk(row.key, chip.label, note.value);
+      rate.appendChild(name);
+      rate.appendChild(yes);
+      rate.appendChild(no);
+      rate.appendChild(note);
+      article.appendChild(rate);
+    }
+    const split = row.record.split || {};
+    if (split.kind === "nudge" && split.shouldNotSplit !== true) {
+      const bar = document.createElement("div");
+      bar.className = "nudge-bar";
+      const copy = document.createElement("span");
+      copy.className = "meta";
+      copy.textContent = "주제가 갈라진 것 같습니다. 새 메모로 나누는 편을 권합니다.";
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "primary";
+      openBtn.textContent = "새 메모로 열기";
+      openBtn.onclick = () => openNewMemo(row.key);
+      const stayBtn = document.createElement("button");
+      stayBtn.type = "button";
+      stayBtn.className = "ghost";
+      stayBtn.textContent = "같은 주제예요";
+      stayBtn.onclick = () => markShouldNotSplit(row.key, true);
+      bar.appendChild(copy);
+      bar.appendChild(openBtn);
+      bar.appendChild(stayBtn);
+      article.appendChild(bar);
+    } else if (split.kind === "candidate" || split.shouldNotSplit === true) {
+      const flag = document.createElement("label");
+      flag.className = "split-flag";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = split.shouldNotSplit === true;
+      box.onchange = () => markShouldNotSplit(row.key, box.checked);
+      flag.appendChild(box);
+      flag.appendChild(document.createTextNode("같은 주제입니다. 나누지 말 것"));
+      article.appendChild(flag);
+    }
+    els.chunkRows.appendChild(article);
   }
-  return appendThemeLog({
-    chunk: currentChunk ? currentChunk.text : "",
-    proposals: currentTheme ? buildThemeChips(currentTheme) : [],
-    confidence: currentTheme ? currentTheme.confidence : null,
-    method: currentTheme ? currentTheme.method : null,
-    chipChosen,
-    newMemoNudge,
-    padId: session.activePadId,
-    activeChunkId: currentChunk ? currentChunk.id : null,
-    model: currentTheme && currentTheme.model,
-    inventedLabelBefore: currentTheme && currentTheme.inventedLabelBefore,
-    inventedLabelAfter: currentTheme && currentTheme.inventedLabelAfter,
-    needsTitle: currentTheme && currentTheme.needsTitle,
-    labelSource: currentTheme && currentTheme.labelSource,
-  });
 }
 
-function renderThemeUi(result, chunk, priors) {
-  currentTheme = result;
-  currentChunk = chunk;
-  const chips = buildThemeChips({ ...result, chunkText: chunk.text });
-  els.themeChips.innerHTML = "";
-  const chosen = activePad().assignedThemeLabel;
-  for (const chip of chips) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chip";
-    if (chip.kind === "새메모") btn.classList.add("drift");
-    if (chip.kind === "기타" || chip.kind === "없음") btn.classList.add("soft");
-    if (chosen && chip.label === chosen) btn.classList.add("on");
-    btn.textContent = chip.label;
-    btn.onclick = () => onChip(chip);
-    els.themeChips.appendChild(btn);
-  }
-  const fp = themeDriftFingerprint(chunk.text, priorLabels(priors));
-  const showNudge = Boolean(result.drift) && !suppressedDrift.has(fp);
-  els.nudgeBar.hidden = !showNudge;
-  const conf = typeof result.confidence === "number" ? result.confidence.toFixed(3) : "—";
-  const err = result.error ? ` · ${result.error}` : "";
-  const invent = result.inventedLabelAfter
-    ? ` · invented ${result.inventedLabelAfter}`
-    : result.needsTitle
-      ? " · awaiting short title"
-      : "";
-  els.themeMeta.textContent = `${result.label || result.method} · confidence ${conf}${result.lowConfidence ? " · low confidence" : ""}${result.drift ? " · drift" : ""}${invent}${err}`;
+function chunkRecord(key) {
+  const pad = activePad();
+  projectChunkBoard(pad, pad.text);
+  return pad.chunkMap[key] || null;
 }
 
-function onChip(chip) {
+function onChunkChip(key, chip) {
   if (chip.kind === "새메모") {
-    openNewMemo();
+    openNewMemo(key);
     return;
   }
   const pad = activePad();
-  pad.assignedThemeLabel = chip.kind === "없음" ? null : chip.label;
-  if (chip.kind === "theme" && chip.label) {
-    rememberSessionTheme(chip.label, currentChunk ? currentChunk.text : pad.text);
+  const record = chunkRecord(key);
+  if (!record) return;
+  const label = chip.kind === "없음" ? null : chip.label;
+  record.stickyLabel = label;
+  if (label) {
+    pad.assignedThemeLabel = label;
+    rememberSessionTheme(label, record.text);
   }
-  updateThemeLog(chip.label, null);
+  upsertChunkLog(pad, record, currentTheme, { chipChosen: chip.label, blockId: key });
   renderPads();
-  els.themeChips.querySelectorAll("button").forEach((btn) => {
-    btn.classList.toggle("on", btn.textContent === chip.label);
-  });
+  renderChunkRows();
 }
 
-function openNewMemo() {
+function rateChunk(key, label, verdict) {
+  const pad = activePad();
+  const record = chunkRecord(key);
+  if (!record) return;
+  if (!record.ratings) record.ratings = {};
+  const prev = record.ratings[label] || { verdict: null, note: "" };
+  record.ratings[label] = { verdict, note: prev.note || "" };
+  if (verdict === "yes") {
+    record.stickyLabel = label;
+    pad.assignedThemeLabel = label;
+    rememberSessionTheme(label, record.text);
+  }
+  const entry = upsertChunkLog(pad, record, currentTheme, {
+    chipChosen: verdict === "yes" ? label : record.stickyLabel,
+    blockId: key,
+  });
+  rateChunkTag(entry, label, verdict, record.ratings[label].note);
+  entry.stickyLabel = record.stickyLabel;
+  persistEvalLog();
+  renderPads();
+  renderLog();
+  renderChunkRows();
+}
+
+function noteChunk(key, label, note) {
+  const pad = activePad();
+  const record = chunkRecord(key);
+  if (!record) return;
+  if (!record.ratings) record.ratings = {};
+  const prev = record.ratings[label] || { verdict: null, note: "" };
+  record.ratings[label] = { verdict: prev.verdict || null, note };
+  const entry = findChunkEntry(pad.id, key) || upsertChunkLog(pad, record, currentTheme, { blockId: key });
+  rateChunkTag(entry, label, prev.verdict || null, note);
+  persistEvalLog();
+}
+
+function markShouldNotSplit(key, value) {
+  const pad = activePad();
+  const record = chunkRecord(key);
+  if (!record || !record.split) return;
+  record.split.shouldNotSplit = value ? true : null;
+  const entry = upsertChunkLog(pad, record, currentTheme, {
+    newMemoNudge: value ? "no" : null,
+    blockId: key,
+  });
+  setChunkShouldNotSplit(entry, value);
+  persistEvalLog();
+  renderLog();
+  renderChunkRows();
+}
+
+function openNewMemo(key) {
   syncPadFromEditor();
   const pad = activePad();
-  const loc = activeChunkAt(pad.text, pad.caret);
-  moveActiveChunkToNewPad(session, loc.active);
-  updateThemeLog("새 메모로 열기", "yes");
-  els.nudgeBar.hidden = true;
+  const rows = projectChunkBoard(pad, pad.text);
+  const row = rows.find((item) => item.key === key);
+  if (!row) return;
+  pad.caret = row.block.start;
+  upsertChunkLog(pad, row.record, currentTheme, {
+    chipChosen: "새 메모로 열기",
+    newMemoNudge: "yes",
+    blockId: row.block.id,
+  });
+  moveActiveChunkToNewPad(session, row.block);
   loadPadIntoEditor();
   els.query.focus();
   scheduleTheme();
-}
-
-function stayOnMemo() {
-  const pad = activePad();
-  const loc = activeChunkAt(pad.text, pad.caret);
-  const priors = collectPriorThemes(pad, loc.earlier);
-  suppressedDrift.add(themeDriftFingerprint(loc.active.text, priorLabels(priors)));
-  updateThemeLog("이 메모에 유지", "no");
-  els.nudgeBar.hidden = true;
 }
 
 async function readJsonOrText(res) {
@@ -589,6 +768,7 @@ function scheduleTheme() {
   syncPadFromEditor();
   renderPads();
   renderHighlight();
+  renderChunkRows();
   window.clearTimeout(themeTimer);
   themeTimer = window.setTimeout(() => {
     runThemePropose();
@@ -669,96 +849,119 @@ async function maybeInventTitle(result, chunk, priors) {
   return next;
 }
 
-async function runThemePropose() {
-  const pad = activePad();
-  const loc = activeChunkAt(pad.text, pad.caret);
-  const chunk = loc.active;
-  if (!normalizeText(chunk.text)) {
-    currentTheme = null;
-    currentChunk = chunk;
-    els.themeChips.innerHTML = "";
-    els.nudgeBar.hidden = true;
+function withProductSplit(result, chunkText, earlier, priors) {
+  const live = result && result.method === "live_jev"
+    ? { newScore: result.newScore, bestPriorTheme: result.bestPriorTheme }
+    : null;
+  const split = classifyChunkSplit({
+    chunkText,
+    earlierTexts: earlier,
+    priorThemes: priors,
+    bestPriorMatch: typeof result.bestPriorMatch === "number" ? result.bestPriorMatch : 0,
+    live,
+  });
+  return {
+    ...result,
+    drift: split.drift,
+    splitKind: split.kind,
+    legacyWouldNudge: split.legacyWouldNudge,
+    falsePositive: split.falsePositive,
+  };
+}
+
+async function judgeChunkText(text, priors, earlier) {
+  const path = livePath();
+  if (path.mode === "none") return proposeThemesHeuristic(text, priors, earlier);
+  const live = await callLiveTheme(text, priors);
+  if (!live.called) return proposeThemesHeuristic(text, priors, earlier);
+  if (!live.ok) {
+    showError(`${live.error}\n${live.detail || ""}`);
+    return {
+      method: "live_jev",
+      label: "live TypeSafe Jev (noul)",
+      confidence: 0,
+      lowConfidence: true,
+      drift: false,
+      splitKind: "none",
+      legacyWouldNudge: false,
+      falsePositive: false,
+      themes: [],
+      needsTitle: false,
+      error: live.error,
+      newScore: 0,
+      bestPriorTheme: 0,
+    };
+  }
+  return live.parsed;
+}
+
+function paintThemeMeta(result) {
+  if (!result) {
     els.themeMeta.textContent = "Theme judge idle.";
     return;
   }
-  const priors = collectPriorThemes(pad, loc.earlier);
+  const conf = typeof result.confidence === "number" ? result.confidence.toFixed(3) : "—";
+  const err = result.error ? ` · ${result.error}` : "";
+  const invent = result.inventedLabelAfter
+    ? ` · invented ${result.inventedLabelAfter}`
+    : result.needsTitle
+      ? " · awaiting short title"
+      : "";
+  const split = result.splitKind === "nudge"
+    ? " · drift"
+    : result.splitKind === "candidate"
+      ? " · kept together"
+      : "";
+  els.themeMeta.textContent = `${result.label || result.method || "theme"} · confidence ${conf}${result.lowConfidence ? " · low confidence" : ""}${split}${invent}${err}`;
+}
+
+async function runThemePropose() {
+  const pad = activePad();
+  const rows = projectChunkBoard(pad, pad.text);
+  if (!rows.length) {
+    currentTheme = null;
+    els.themeMeta.textContent = "Theme judge idle.";
+    renderChunkRows();
+    return;
+  }
   const seq = (themeSeq += 1);
-  const path = livePath();
   try {
-    let result;
-    if (path.mode === "none") {
-      result = proposeThemesHeuristic(chunk.text, priors, loc.earlier);
-    } else {
-      els.themeMeta.textContent = "Scoring the active chunk…";
-      const live = await callLiveTheme(chunk.text, priors);
-      if (seq !== themeSeq) return;
-      if (!live.called) {
-        result = proposeThemesHeuristic(chunk.text, priors, loc.earlier);
-      } else if (!live.ok) {
-        showError(`${live.error}\n${live.detail || ""}`);
-        els.themeMeta.textContent = live.error;
-        renderThemeUi(
-          {
-            method: "live_jev",
-            label: "live TypeSafe Jev (noul)",
-            confidence: 0,
-            lowConfidence: true,
-            drift: false,
-            themes: [],
-            needsTitle: false,
-            error: live.error,
-          },
-          chunk,
-          priors
-        );
-        appendThemeLog({
-          chunk: chunk.text,
-          proposals: [],
-          confidence: 0,
-          method: "live_jev",
-          chipChosen: null,
-          newMemoNudge: null,
-          padId: pad.id,
-          activeChunkId: chunk.id,
-        });
-        return;
-      } else {
-        result = live.parsed;
+    for (const row of rows) {
+      if (
+        row.record.judgedText &&
+        normalizeText(row.record.judgedText) === normalizeText(row.record.text)
+      ) {
+        continue;
       }
+      const earlier = rows
+        .filter((item) => item.block.index < row.block.index)
+        .map((item) => item.block.text);
+      const priors = collectPriorThemes(pad, earlier);
+      els.themeMeta.textContent = "Scoring chunks…";
+      let result = await judgeChunkText(row.block.text, priors, earlier);
+      if (seq !== themeSeq) return;
+      result = await maybeInventTitle(result, { text: row.block.text }, priors);
+      if (seq !== themeSeq) return;
+      if (!result.error) {
+        result = withProductSplit(result, row.block.text, earlier, priors);
+      }
+      result.judgedText = row.block.text;
+      for (const theme of result.themes || []) {
+        if (theme.label) rememberSessionTheme(theme.label, row.block.text);
+      }
+      applyChunkJudgment(row.record, result);
+      showError(result.error || "");
+      currentTheme = result;
+      upsertChunkLog(pad, row.record, result, { blockId: row.block.id });
+      paintThemeMeta(result);
+      renderChunkRows();
     }
-    if (seq !== themeSeq) return;
-    result = await maybeInventTitle(result, chunk, priors);
-    if (seq !== themeSeq) return;
-    for (const theme of result.themes || []) {
-      if (theme.label) rememberSessionTheme(theme.label, chunk.text);
-    }
-    commitTheme(result, chunk, priors);
   } catch (err) {
     if (seq !== themeSeq) return;
     const message = err && err.message ? err.message : String(err);
     showError(message);
     els.themeMeta.textContent = message;
   }
-}
-
-function commitTheme(result, chunk, priors) {
-  showError(result && result.error ? `${result.error}` : "");
-  renderThemeUi(result, chunk, priors);
-  appendThemeLog({
-    chunk: chunk.text,
-    proposals: buildThemeChips({ ...result, chunkText: chunk.text }),
-    confidence: result.confidence,
-    method: result.method,
-    chipChosen: null,
-    newMemoNudge: null,
-    padId: activePad().id,
-    activeChunkId: chunk.id,
-    model: result.model,
-    inventedLabelBefore: result.inventedLabelBefore || null,
-    inventedLabelAfter: result.inventedLabelAfter || null,
-    needsTitle: result.needsTitle,
-    labelSource: result.labelSource || null,
-  });
 }
 
 async function findRelated() {
@@ -985,15 +1188,14 @@ els.clearQueryBtn.onclick = () => {
   pad.text = "";
   pad.caret = 0;
   pad.assignedThemeLabel = null;
+  pad.chunkMap = {};
+  pad.chunkSeq = 0;
   currentRun = null;
   currentTheme = null;
-  currentChunk = null;
   showError("");
   setBadge("idle");
   els.resultMeta.textContent = "No search yet.";
   els.themeMeta.textContent = "Theme judge idle.";
-  els.themeChips.innerHTML = "";
-  els.nudgeBar.hidden = true;
   loadPadIntoEditor();
   renderResults();
 };
@@ -1006,8 +1208,6 @@ els.addPadBtn.onclick = () => {
   els.query.focus();
   scheduleTheme();
 };
-els.openNewMemoBtn.onclick = openNewMemo;
-els.stayMemoBtn.onclick = stayOnMemo;
 els.confirmPasteBtn.onclick = confirmPaste;
 els.dismissPasteBtn.onclick = dismissPaste;
 els.showAllBtn.onclick = () => {
@@ -1046,7 +1246,6 @@ els.clearLogBtn.onclick = () => {
   if (!evalLog.length) return;
   if (!window.confirm("Clear the eval log from this browser?")) return;
   evalLog = [];
-  lastThemeEntry = null;
   persistEvalLog();
   currentRun = null;
   els.note.value = "";
@@ -1059,6 +1258,7 @@ renderLog();
 renderResults();
 renderKeyStatus();
 renderHighlight();
+renderChunkRows();
 
 loadCorpus()
   .then(loadServerStatus)
