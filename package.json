@@ -2,7 +2,7 @@
   "name": "jev-memo-relatedness-demo",
   "private": true,
   "scripts": {
-    "test": "node test/relatedness.test.cjs",
+    "test": "node test/relatedness.test.cjs && node test/theme-chunk.test.cjs",
     "start": "python3 -m http.server 8765"
   }
 }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Memo relatedness — 41 Korean memos, no answer key</title>
+<title>Memo relatedness — 41 Korean memos, write-time themes</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -19,6 +19,7 @@
   --ok:#5ef0c5;
   --warn:#ffb86b;
   --bad:#ff7b8a;
+  --mark:#2a4a38;
 }
 *{box-sizing:border-box}
 body{
@@ -42,7 +43,7 @@ textarea,input[type="password"],input[type="search"]{
   width:100%;border-radius:12px;border:1px solid var(--line);background:#0a100e;color:var(--text);
   padding:12px;font-size:14px;line-height:1.5
 }
-textarea{min-height:140px;resize:vertical}
+textarea{min-height:160px;resize:vertical}
 .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
 button{
   appearance:none;border:1px solid var(--line);background:#1a221f;color:var(--text);
@@ -52,6 +53,12 @@ button:hover{border-color:#4d655b}
 button.primary{background:#1f3b30;border-color:#3d7a5f;color:#d9ffe9}
 button.ghost{background:transparent}
 button:disabled{opacity:.55;cursor:wait}
+button.chip{
+  border-radius:999px;padding:6px 12px;font-size:12px;background:#15201c
+}
+button.chip.on{border-color:#3d7a5f;color:var(--ok)}
+button.chip.drift{border-color:#6b5d32;color:var(--accent-2)}
+button.chip.soft{opacity:.9}
 .section{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px}
 .badge{display:inline-block;font-size:10px;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted)}
 .badge.ok{color:var(--ok);border-color:#2c5c4e}
@@ -65,13 +72,13 @@ button:disabled{opacity:.55;cursor:wait}
 }
 .pool,.results,.log-list{display:grid;gap:8px}
 .pool{max-height:520px;overflow:auto;padding-right:4px}
-.log-list{max-height:320px;overflow:auto}
-.memo-card,.result,.log-item{
+.log-list{max-height:360px;overflow:auto}
+.memo-card,.result,.log-item,.theme-card,.paste-theme{
   text-align:left;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#101614;color:var(--text)
 }
 .memo-card{cursor:pointer;width:100%}
 .memo-card:hover{border-color:#4d655b}
-.memo-card p,.result p,.log-item p{margin:6px 0 0;font-size:13px;line-height:1.45}
+.memo-card p,.result p,.log-item p,.theme-card p{margin:6px 0 0;font-size:13px;line-height:1.45}
 .memo-head,.result-top,.log-head,.rate{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
 .rank{color:var(--accent);font-size:12px;margin-left:6px}
 .score{font-size:12px;color:var(--text)}
@@ -80,19 +87,44 @@ button:disabled{opacity:.55;cursor:wait}
 .rate button.on.yes{border-color:#2c5c4e;color:var(--ok)}
 .rate button.on.no{border-color:#6a2f38;color:var(--bad)}
 .empty{color:var(--muted);font-size:13px;margin:0}
+.pad-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.pad-tabs button.on{border-color:#3d7a5f;color:var(--ok)}
+.editor-shell{position:relative}
+.editor-highlight{
+  position:absolute;inset:0;padding:12px;border-radius:12px;border:1px solid transparent;
+  font:inherit;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;overflow:hidden;
+  color:transparent;pointer-events:none;z-index:0
+}
+.editor-highlight mark{
+  background:var(--mark);color:transparent;border-radius:4px
+}
+#query{
+  position:relative;z-index:1;background:transparent;caret-color:var(--text)
+}
+.theme-chips{display:flex;flex-wrap:wrap;gap:6px;min-height:34px;margin-top:8px}
+.nudge-bar{
+  margin-top:8px;padding:10px 12px;border:1px dashed #6b5d32;border-radius:12px;
+  background:#18160f;display:flex;flex-wrap:wrap;gap:8px;align-items:center
+}
+.nudge-bar[hidden]{display:none}
+details.fallback{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#0f1412}
+details.fallback summary{cursor:pointer;color:var(--accent-2)}
+.paste-themes{display:grid;gap:10px;margin-top:10px}
+.paste-theme .cards{display:grid;gap:6px;margin-top:8px}
+.sibling-chip{font-size:11px;color:var(--accent-2);margin-left:6px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>Memo relatedness</h1>
-    <p class="sub">Paste a query memo. Rank related notes from a fixed pool of <strong>41 Korean memos</strong>. Rate each suggestion Yes/No. The eval log stays in this browser so matching can improve later.</p>
-    <p class="compare-note">This is outbound relatedness, not category classify. The fixture has <code>ground_truth: null</code> — no answer key and no invented clusters. m31–m41 are first-class long / multi-topic dumps (m37 is a real messy dump).</p>
+    <p class="sub">While you type, the active chunk is highlighted and theme chips appear under the editor. On topic drift, prefer <strong>새 메모로 열기</strong>. Rank related notes from a pool of <strong>41 Korean memos</strong>. No answer key.</p>
+    <p class="compare-note">Primary path is write-time chips. Theme→child accordion is only a fallback after a multi-block paste. Fixture <code>ground_truth: null</code>. m37 is a real messy dump.</p>
   </header>
 
   <section class="panel">
     <div class="section">Keys</div>
-    <label for="jevKey">TypeSafe Jev key. Saved as localStorage <code>jev_api_key</code>. Never committed. Used only for live TypeSafe <code>POST /v1/systemone</code>.</label>
+    <label for="jevKey">TypeSafe Jev key. Saved as localStorage <code>jev_api_key</code>. Never committed. Used for live theme chips and Find related.</label>
     <input id="jevKey" type="password" autocomplete="off" placeholder="paste key here, or leave empty for the keyword baseline" />
     <div class="row">
       <button type="button" id="saveKeysBtn">Save local key</button>
@@ -105,16 +137,38 @@ button:disabled{opacity:.55;cursor:wait}
   <div class="grid">
     <div class="stack">
       <section class="panel">
-        <div class="section">Query memo</div>
-        <label for="query">Paste or type a memo. Click a pool card to copy it here.</label>
-        <textarea id="query" placeholder="예: 편의점 삼각김밥이랑 바나나우유로 저녁 때움."></textarea>
+        <div class="section">Write memo · live theme chips</div>
+        <div id="padTabs" class="pad-tabs"></div>
+        <label for="query">Type or paste. Active chunk (blank-line block at the caret) is highlighted. Chips update while typing.</label>
+        <div class="editor-shell">
+          <div id="editorHighlight" class="editor-highlight" aria-hidden="true"></div>
+          <textarea id="query" placeholder="예: 금오산 케이블카 할인 여부"></textarea>
+        </div>
+        <div id="themeChips" class="theme-chips" aria-live="polite"></div>
+        <div id="nudgeBar" class="nudge-bar" hidden>
+          <span class="meta">주제가 갈라진 것 같습니다. 새 메모로 나누는 편을 권합니다.</span>
+          <button type="button" class="primary" id="openNewMemoBtn">새 메모로 열기</button>
+          <button type="button" class="ghost" id="stayMemoBtn">이 메모에 유지</button>
+        </div>
+        <p class="meta" id="themeMeta" style="margin-top:8px">Theme judge idle.</p>
         <div class="row">
           <button type="button" class="primary" id="findBtn">Find related</button>
-          <button type="button" class="ghost" id="clearQueryBtn">Clear</button>
+          <button type="button" class="ghost" id="clearQueryBtn">Clear pad</button>
+          <button type="button" class="ghost" id="addPadBtn">+ pad</button>
           <span class="badge" id="methodBadge">idle</span>
         </div>
         <p class="meta" id="resultMeta" style="margin-top:10px">No search yet.</p>
         <div id="errorBox" class="error" hidden></div>
+
+        <details id="pasteFallback" class="fallback" style="margin-top:14px" hidden>
+          <summary>붙여넣은 메모 구조 나누기 (fallback)</summary>
+          <p class="meta">Already-pasted multi-block dump. Merge / move / detach children, then confirm. Not the main write path.</p>
+          <div id="pasteThemes" class="paste-themes"></div>
+          <div class="row">
+            <button type="button" class="primary" id="confirmPasteBtn">Confirm structure</button>
+            <button type="button" class="ghost" id="dismissPasteBtn">Dismiss</button>
+          </div>
+        </details>
       </section>
 
       <section class="panel">
@@ -123,7 +177,7 @@ button:disabled{opacity:.55;cursor:wait}
         <div class="row">
           <button type="button" class="ghost" id="showAllBtn" hidden>Show all</button>
         </div>
-        <label for="note" style="margin-top:12px">Optional note for this run</label>
+        <label for="note" style="margin-top:12px">Optional note for this relatedness run</label>
         <textarea id="note" style="min-height:72px" placeholder="What felt right or wrong about the ranking?"></textarea>
       </section>
     </div>
@@ -131,15 +185,15 @@ button:disabled{opacity:.55;cursor:wait}
     <section class="panel">
       <div class="section">Pool · 41 memos · no answer key</div>
       <label for="poolSearch">Search the pool</label>
-      <input id="poolSearch" type="search" placeholder="id or text · e.g. m31, 세탁, 삼각김밥" />
+      <input id="poolSearch" type="search" placeholder="id or text · e.g. m37, 세탁, 케이블카" />
       <p class="meta" id="poolCount" style="margin:8px 0">0 / 0</p>
       <div id="pool" class="pool"></div>
     </section>
   </div>
 
   <section class="panel">
-    <div class="section">Eval log · localStorage <code>memoRelatednessEvalLog</code></div>
-    <p class="meta">Each Find related appends: timestamp, query, method (<code>heuristic</code> or <code>live_jev</code>), ranked id/rank/score, per-item Yes/No, optional note. Survives refresh on this browser.</p>
+    <div class="section">Eval / test log · localStorage <code>memoRelatednessEvalLog</code></div>
+    <p class="meta">Records <code>theme_chunk</code> (chunk, proposals, confidence, method, chipChosen, newMemoNudge) and <code>related_run</code> (Find related + Yes/No). Export JSON or JSONL.</p>
     <div class="row">
       <button type="button" id="exportJsonBtn">Download JSON</button>
       <button type="button" id="exportJsonlBtn">Download JSONL</button>

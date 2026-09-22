@@ -150,6 +150,7 @@ const entry = makeEvalEntry({
   method: "heuristic",
   ranked: food.ranked.slice(0, 3),
 });
+assert.equal(entry.kind, "related_run");
 assert.equal(entry.method, "heuristic");
 assert.equal(entry.query, "테스트 쿼리");
 assert.ok(entry.ts);

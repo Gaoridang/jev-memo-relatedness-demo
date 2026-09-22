@@ -1,29 +1,57 @@
 # Memo relatedness demo
 
-Paste a **query memo** and rank **related memos** from a fixed pool of **41 Korean memos**. Rate each suggestion Yes/No. The eval log stays in the browser so matching can be improved later.
+Paste or type a **query memo** and rank **related memos** from a fixed pool of **41 Korean memos**. Rate each suggestion Yes/No. The eval log stays in the browser so matching can be improved later.
 
 This is **relatedness**, not category classification.
 
-The corpus fixture is `fixtures/korean-memo-relatedness-30.json` (filename kept; `count` is 41, ids `m01`–`m41`). `ground_truth` is `null`. There is no answer key and no invented cluster map. `m31`–`m41` are longer multi-topic dumps and stay first-class pool items (`m37` is a real messy dump; `m38`–`m41` are synthetic workshop/lab/club/field dumps).
+## Write-time themes (primary)
 
-## How query → related works
+While you type, the demo judges the **active chunk** (blank-line block at the caret). It does not wait for submit.
 
-1. The UI loads all 41 memos from the fixture. Click a pool card or paste any text.
+1. The active chunk is **highlighted** in the editor.
+2. **Theme chips** render directly under that row (debounced).
+3. Live TypeSafe Jev when `JEV_API_KEY` (Vercel) or localStorage `jev_api_key` is set. Otherwise a labeled **keyword / overlap baseline**.
+4. Low confidence always offers **`기타`** and **`없음`**.
+5. On topic drift, prefer **`새 메모로 열기`** (moves the drifted chunk to a new pad). **`이 메모에 유지`** dismisses that nudge for the same chunk fingerprint.
+6. Choosing a theme chip tags the pad. Find related marks same-theme siblings when a theme chip is set.
+
+## Fallback (paste only)
+
+If you paste a dump with **3+ blank-line blocks**, a collapsed **붙여넣은 메모 구조 나누기** panel appears. It proposes theme parents with child cards. You can merge themes, move cards, or detach a card to a standalone theme, then confirm into pads. This path is secondary. Write-time chips remain the main loop.
+
+## Corpus
+
+The fixture is `fixtures/korean-memo-relatedness-30.json` (filename kept; `count` is 41, ids `m01`–`m41`). `ground_truth` is `null`. There is no answer key. `m31`–`m41` are longer multi-topic dumps. `m37` is a real messy dump. `m38`–`m41` are synthetic workshop/lab/club/field dumps. The pool UI shows all 41.
+
+## How Find related works
+
+1. Load all 41 memos. Click a pool card or type in a pad.
 2. **Find related** excludes an exact self-match, then ranks the rest.
-3. **With a TypeSafe key** (`JEV_API_KEY` on Vercel and/or localStorage `jev_api_key`): one live TypeSafe Jev call, `POST https://api.typesafe.ai/v1/systemone`. The state is `{ query_memo, pool }`. Each candidate is a **Noul** question: is this memo related to the query? Results are sorted by `noul` (P(related)). Method label: `live_jev`. Failures show the real HTTP/parse error. There are no mocks, stubs, or canned Jev JSON.
-4. **Without a key**: a labeled **keyword / overlap baseline** still returns ranked candidates (Korean tokens + character bigrams). Method label: `heuristic`.
+3. **With a TypeSafe key**: one live TypeSafe Jev call, `POST https://api.typesafe.ai/v1/systemone`. Method label: `live_jev`. Failures show the real HTTP/parse error. No mocks.
+4. **Without a key**: labeled keyword / overlap baseline. Method label: `heuristic`.
 
-## Eval log
+Theme-chunk live calls use the same key paths with `mode: "theme_chunk"` on `/api/jev` (or browser TypeSafe). Account default model only (`jev-latest` in the request body). No model override UI.
 
-Stored in `localStorage` as `memoRelatednessEvalLog`. Each run records:
+## Eval / test log
+
+Stored in `localStorage` as `memoRelatednessEvalLog`. Entries use a `kind` field.
+
+**`theme_chunk`** (write-time test mode):
 
 - `ts`
-- `query`
+- `chunk`
+- `proposals` (themes + 기타/없음/새 메모로 열기 when offered)
+- `confidence`
 - `method` (`heuristic` | `live_jev`)
-- `model` (when Jev answered)
-- `ranked`: `{ id, rank, score, why }`
-- `ratings`: per-id `yes` / `no` / `null`
-- `note` (optional)
+- `chipChosen`
+- `newMemoNudge` (`yes` | `no` | `null`)
+- `padId`, `activeChunkId`
+
+**`related_run`** (Find related):
+
+- `ts`, `query`, `method`, `model`, `ranked`, `ratings` (Yes/No), `note`
+
+**`theme_edit`** (paste fallback moves/merges).
 
 Export JSON or JSONL from the page. Clear wipes this browser only.
 
@@ -36,15 +64,15 @@ python3 -m http.server 8765
 
 Open http://localhost:8765/
 
-- Heuristic Find related works with no key.
-- For live Jev from the browser, paste a TypeSafe key and click **Save local key**. That value stays in `localStorage` as `jev_api_key` and is sent only to TypeSafe.
-- Local `/api/jev` needs `vercel dev` (or the deployed Vercel URL). A static file server does not run the function.
+- Heuristic theme chips and Find related work with no key.
+- For live Jev from the browser, paste a TypeSafe key and click **Save local key**.
+- Local `/api/jev` needs `vercel dev` (or the deployed Vercel URL).
 
 ## Deploy
 
 Import `Gaoridang/jev-memo-relatedness-demo` in the Vercel dashboard, or push to GitHub and let the linked project deploy.
 
-Public URL (after deploy): `https://jev-memo-relatedness-demo.vercel.app`
+Public URL: `https://jev-memo-relatedness-demo.vercel.app`
 
 ## Where the key goes
 
@@ -55,8 +83,4 @@ Use only these names. Do not commit values.
 | Vercel env | `JEV_API_KEY` | Operator, in the Vercel dashboard | `POST /api/jev` → TypeSafe `POST /v1/systemone` |
 | Browser localStorage | `jev_api_key` | Operator, in the on-page field | Browser `fetch` to TypeSafe. Never posted to this site’s server. |
 
-If Vercel env `JEV_API_KEY` is set, Find related uses `/api/jev`. The browser field stays in localStorage and is not posted to this site. A localStorage key is used only when the env is absent.
-
-A browser call can fail with a CORS error from TypeSafe. The UI shows that error. The Vercel env path avoids browser CORS.
-
-The functions do not log header or env values.
+If Vercel env `JEV_API_KEY` is set, live calls use `/api/jev`. A localStorage key is used only when the env is absent. Real errors only. The functions do not log header or env values.

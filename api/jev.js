@@ -1,4 +1,8 @@
-const { SYSTEMONE_URL, buildRelatednessRequest } = require("../shared");
+const {
+  SYSTEMONE_URL,
+  buildRelatednessRequest,
+  buildThemeChunkRequest,
+} = require("../shared");
 
 function readBody(req) {
   if (req.body && typeof req.body === "object") return { ok: true, body: req.body };
@@ -10,6 +14,30 @@ function readBody(req) {
     }
   }
   return { ok: true, body: {} };
+}
+
+async function proxySystemOne(res, key, payload) {
+  let upstream;
+  try {
+    upstream = await fetch(SYSTEMONE_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    res.status(502).json({
+      error: "TypeSafe network error",
+      detail: err && err.message ? err.message : String(err),
+    });
+    return;
+  }
+  const text = await upstream.text();
+  res.status(upstream.status);
+  res.setHeader("Content-Type", upstream.headers.get("content-type") || "application/json");
+  res.send(text);
 }
 
 module.exports = async function handler(req, res) {
@@ -31,8 +59,22 @@ module.exports = async function handler(req, res) {
     res.status(400).json({ error: parsed.error });
     return;
   }
-  const query = parsed.body && typeof parsed.body.query === "string" ? parsed.body.query : "";
-  const candidates = parsed.body && Array.isArray(parsed.body.candidates) ? parsed.body.candidates : [];
+  const body = parsed.body || {};
+  const mode = body.mode === "theme_chunk" ? "theme_chunk" : "relatedness";
+
+  if (mode === "theme_chunk") {
+    const chunk = typeof body.chunk === "string" ? body.chunk : "";
+    if (!chunk.trim()) {
+      res.status(400).json({ error: "chunk is required" });
+      return;
+    }
+    const priorThemes = Array.isArray(body.priorThemes) ? body.priorThemes : [];
+    await proxySystemOne(res, key, buildThemeChunkRequest(chunk, priorThemes));
+    return;
+  }
+
+  const query = typeof body.query === "string" ? body.query : "";
+  const candidates = Array.isArray(body.candidates) ? body.candidates : [];
   if (!query.trim()) {
     res.status(400).json({ error: "query is required" });
     return;
@@ -52,25 +94,5 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  let upstream;
-  try {
-    upstream = await fetch(SYSTEMONE_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(buildRelatednessRequest(query, candidates)),
-    });
-  } catch (err) {
-    res.status(502).json({
-      error: "TypeSafe network error",
-      detail: err && err.message ? err.message : String(err),
-    });
-    return;
-  }
-  const text = await upstream.text();
-  res.status(upstream.status);
-  res.setHeader("Content-Type", upstream.headers.get("content-type") || "application/json");
-  res.send(text);
+  await proxySystemOne(res, key, buildRelatednessRequest(query, candidates));
 };
