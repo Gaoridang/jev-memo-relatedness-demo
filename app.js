@@ -51,7 +51,6 @@ let session = createPadSession({ pad: { id: "p01", text: "" } });
 let sessionThemePriors = [];
 let themeTimer = null;
 let themeSeq = 0;
-let currentTheme = null;
 let pendingPasteCount = 0;
 let pasteState = null;
 let newMemoDraft = null;
@@ -323,7 +322,6 @@ function syncPadFromEditor() {
 
 function loadPadIntoEditor() {
   const pad = activePad();
-  currentTheme = null;
   els.query.value = pad.text;
   const caret = Math.min(pad.caret || pad.text.length, pad.text.length);
   els.query.setSelectionRange(caret, caret);
@@ -406,25 +404,30 @@ function findChunkEntry(padId, chunkKey) {
   );
 }
 
-function upsertChunkLog(pad, record, result, extra) {
+function upsertChunkLog(pad, record, extra) {
+  if (!record.theme) record.theme = themeFromLegacy(record);
+  const projected = projectThemeLog(record);
+  record.stickyLabel = projected.stickyLabel;
+  const meta = extra || {};
   const split = record.split || {};
+  const has = (key) => Object.prototype.hasOwnProperty.call(meta, key);
   const fields = {
     chunk: record.text,
-    proposals: visibleChunkTags(record),
-    confidence: result ? result.confidence : null,
-    method: result ? result.method : null,
-    chipChosen: record.stickyLabel || null,
-    newMemoNudge: extra && extra.newMemoNudge !== undefined ? extra.newMemoNudge : null,
+    proposals: projected.proposals,
+    confidence: has("confidence") ? meta.confidence : null,
+    method: has("method") ? meta.method : null,
+    chipChosen: projected.chipChosen,
+    newMemoNudge: meta.newMemoNudge !== undefined ? meta.newMemoNudge : null,
     padId: pad.id,
-    activeChunkId: extra && extra.blockId ? extra.blockId : record.key,
+    activeChunkId: meta.blockId ? meta.blockId : record.key,
     chunkKey: record.key,
-    model: result && result.model,
-    inventedLabelBefore: result && result.inventedLabelBefore,
-    inventedLabelAfter: result && result.inventedLabelAfter,
-    needsTitle: result && result.needsTitle,
-    labelSource: result && result.labelSource,
+    model: has("model") ? meta.model : null,
+    inventedLabelBefore: projected.inventedLabelBefore,
+    inventedLabelAfter: projected.inventedLabelAfter,
+    needsTitle: projected.needsTitle,
+    labelSource: null,
     ratings: record.ratings || {},
-    stickyLabel: record.stickyLabel || null,
+    stickyLabel: projected.stickyLabel,
     splitKind: split.kind || "none",
     legacyWouldNudge: split.legacyWouldNudge,
     falsePositive: split.falsePositive,
@@ -436,43 +439,33 @@ function upsertChunkLog(pad, record, result, extra) {
     evalLog.push(entry);
   } else {
     entry.proposals = fields.proposals;
-    entry.confidence = fields.confidence;
-    entry.method = fields.method;
-    entry.model = fields.model;
+    if (has("confidence")) entry.confidence = meta.confidence;
+    if (has("method")) entry.method = meta.method;
+    if (has("model")) entry.model = meta.model;
     entry.chunk = fields.chunk;
     entry.activeChunkId = fields.activeChunkId;
-    entry.inventedLabelBefore = fields.inventedLabelBefore || null;
-    entry.inventedLabelAfter = fields.inventedLabelAfter || null;
-    entry.needsTitle = Boolean(fields.needsTitle);
-    entry.labelSource = fields.labelSource || null;
+    entry.inventedLabelBefore = projected.inventedLabelBefore;
+    entry.inventedLabelAfter = projected.inventedLabelAfter;
+    entry.needsTitle = projected.needsTitle;
     entry.ratings = fields.ratings;
-    entry.stickyLabel = fields.stickyLabel;
-    entry.chipChosen = fields.chipChosen;
+    entry.stickyLabel = projected.stickyLabel;
+    entry.chipChosen = projected.chipChosen;
     entry.splitKind = fields.splitKind;
     entry.legacyWouldNudge = fields.legacyWouldNudge;
     entry.falsePositive = fields.falsePositive;
     if (fields.shouldNotSplit === true) entry.shouldNotSplit = true;
-    if (fields.newMemoNudge === "yes" || fields.newMemoNudge === "no") {
-      entry.newMemoNudge = fields.newMemoNudge;
+    if (meta.newMemoNudge === "yes" || meta.newMemoNudge === "no") {
+      entry.newMemoNudge = meta.newMemoNudge;
     }
   }
-  if (extra && extra.chipChosen !== undefined) {
-    setThemeChunkChoice(entry, extra.chipChosen, extra.newMemoNudge);
-    entry.chipChosen = extra.chipChosen;
-    entry.stickyLabel = record.stickyLabel || null;
+  if (meta.chipChosen !== undefined) {
+    setThemeChunkChoice(entry, meta.chipChosen, meta.newMemoNudge);
+    entry.chipChosen = meta.chipChosen;
+    entry.stickyLabel = projected.stickyLabel;
   }
   persistEvalLog();
   renderLog();
   return entry;
-}
-
-function rowTags(record) {
-  const tags = visibleChunkTags(record);
-  const split = record.split || {};
-  if (split.kind === "nudge" && split.shouldNotSplit !== true) {
-    tags.push({ id: "새메모", label: "새 메모로 열기", kind: "새메모", score: null });
-  }
-  return tags;
 }
 
 function renderChunkRows() {
@@ -486,6 +479,9 @@ function renderChunkRows() {
     return;
   }
   for (const row of rows) {
+    if (!row.record.theme) row.record.theme = themeFromLegacy(row.record);
+    const view = themeView(row.record.theme);
+    const committed = choiceLabel(row.record.theme);
     const article = document.createElement("article");
     article.className = "chunk-row";
     if (row.block.id === loc.active.id) article.classList.add("active");
@@ -501,16 +497,38 @@ function renderChunkRows() {
       renderChunkRows();
     };
     article.appendChild(excerpt);
+    if (view.kind === "ask" && view.prompt) {
+      const prompt = document.createElement("p");
+      prompt.className = "chunk-ask";
+      prompt.textContent = view.prompt;
+      article.appendChild(prompt);
+    }
+    if (view.kind === "children" && view.heading) {
+      const heading = document.createElement("p");
+      heading.className = "chunk-heading";
+      if (committed && (committed === view.heading || view.highlightedKey === view.headingKey)) {
+        heading.classList.add("on");
+      }
+      heading.textContent = view.heading;
+      article.appendChild(heading);
+    }
     const chips = document.createElement("div");
     chips.className = "theme-chips";
-    const tags = rowTags(row.record);
-    for (const chip of tags) {
+    const split = row.record.split || {};
+    const nudge = split.kind === "nudge" && split.shouldNotSplit !== true;
+    const shown = view.chips.slice();
+    if (nudge) {
+      shown.push({ key: "새메모", label: "새 메모로 열기", kind: "새메모" });
+    }
+    for (const chip of shown) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "chip";
+      if (chip.role === "child") btn.classList.add("sibling");
       if (chip.kind === "새메모") btn.classList.add("drift");
-      if (chip.kind === "기타" || chip.kind === "없음") btn.classList.add("soft");
-      if (row.record.stickyLabel && chip.label === row.record.stickyLabel) btn.classList.add("on");
+      if (chip.role === "fallback") btn.classList.add("soft");
+      if (committed && chip.label === committed) btn.classList.add("on");
+      if (view.highlightedKey && chip.key === view.highlightedKey) btn.classList.add("on");
       btn.textContent = chip.label;
       btn.onclick = () => {
         if (chip.kind === "새메모") {
@@ -521,10 +539,17 @@ function renderChunkRows() {
       };
       chips.appendChild(btn);
     }
+    if (view.canOpenParentMenu) {
+      const parentBtn = document.createElement("button");
+      parentBtn.type = "button";
+      parentBtn.className = "chip ghost";
+      parentBtn.textContent = "상위 주제";
+      parentBtn.onclick = () => openChunkParents(row.key);
+      chips.appendChild(parentBtn);
+    }
     article.appendChild(chips);
-    for (const chip of tags) {
-      if (chip.kind === "새메모") continue;
-      const rating = (row.record.ratings && row.record.ratings[chip.label]) || {};
+    for (const chip of view.chips) {
+      const rating = (row.record.ratings && row.record.ratings[chip.key]) || {};
       const rate = document.createElement("div");
       rate.className = "rate";
       const name = document.createElement("span");
@@ -533,26 +558,25 @@ function renderChunkRows() {
       yes.type = "button";
       yes.textContent = "Yes";
       yes.className = rating.verdict === "yes" ? "on yes" : "";
-      yes.onclick = () => rateChunk(row.key, chip.label, "yes");
+      yes.onclick = () => rateChunk(row.key, chip, "yes");
       const no = document.createElement("button");
       no.type = "button";
       no.textContent = "No";
       no.className = rating.verdict === "no" ? "on no" : "";
-      no.onclick = () => rateChunk(row.key, chip.label, "no");
+      no.onclick = () => rateChunk(row.key, chip, "no");
       const note = document.createElement("input");
       note.className = "chunk-note";
       note.type = "text";
       note.placeholder = "optional note";
       note.value = rating.note || "";
-      note.oninput = () => noteChunk(row.key, chip.label, note.value);
+      note.oninput = () => noteChunk(row.key, chip, note.value);
       rate.appendChild(name);
       rate.appendChild(yes);
       rate.appendChild(no);
       rate.appendChild(note);
       article.appendChild(rate);
     }
-    const split = row.record.split || {};
-    if (split.kind === "nudge" && split.shouldNotSplit !== true) {
+    if (nudge) {
       const bar = document.createElement("div");
       bar.className = "nudge-bar";
       const copy = document.createElement("span");
@@ -596,51 +620,65 @@ function chunkRecord(key) {
 function onChunkChip(key, chip) {
   const pad = activePad();
   const record = chunkRecord(key);
-  if (!record) return;
-  const label = chip.kind === "없음" ? null : chip.label;
+  if (!record || !chip || !chip.choice) return;
+  if (!record.theme) record.theme = themeFromLegacy(record);
+  record.theme = commitPick(record.theme, chip.choice, record.text);
+  const label = choiceLabel(record.theme);
   record.stickyLabel = label;
-  if (label) {
+  if (label && chip.choice.kind !== "fallback") {
     pad.assignedThemeLabel = label;
     rememberSessionTheme(label, record.text);
   }
-  upsertChunkLog(pad, record, currentTheme, { chipChosen: chip.label, blockId: key });
+  upsertChunkLog(pad, record, { chipChosen: chip.label, blockId: key });
   renderPads();
   renderChunkRows();
 }
 
-function rateChunk(key, label, verdict) {
+function openChunkParents(key) {
   const pad = activePad();
   const record = chunkRecord(key);
   if (!record) return;
+  if (!record.theme) record.theme = themeFromLegacy(record);
+  record.theme = openParentMenu(record.theme);
+  record.stickyLabel = choiceLabel(record.theme);
+  upsertChunkLog(pad, record, { blockId: key });
+  renderChunkRows();
+}
+
+function rateChunk(key, chip, verdict) {
+  const pad = activePad();
+  const record = chunkRecord(key);
+  if (!record || !chip) return;
   if (!record.ratings) record.ratings = {};
-  const prev = record.ratings[label] || { verdict: null, note: "" };
-  record.ratings[label] = { verdict, note: prev.note || "" };
-  if (verdict === "yes") {
+  const prev = record.ratings[chip.key] || { verdict: null, note: "" };
+  record.ratings[chip.key] = { verdict, note: prev.note || "" };
+  if (verdict === "yes" && chip.choice) {
+    if (!record.theme) record.theme = themeFromLegacy(record);
+    record.theme = commitPick(record.theme, chip.choice, record.text);
+    const label = choiceLabel(record.theme);
     record.stickyLabel = label;
-    pad.assignedThemeLabel = label;
-    rememberSessionTheme(label, record.text);
+    if (label && chip.choice.kind !== "fallback") {
+      pad.assignedThemeLabel = label;
+      rememberSessionTheme(label, record.text);
+    }
   }
-  const entry = upsertChunkLog(pad, record, currentTheme, {
-    chipChosen: verdict === "yes" ? label : record.stickyLabel,
-    blockId: key,
-  });
-  rateChunkTag(entry, label, verdict, record.ratings[label].note);
-  entry.stickyLabel = record.stickyLabel;
+  const entry = upsertChunkLog(pad, record, { blockId: key });
+  rateChunkTag(entry, chip.label, verdict, record.ratings[chip.key].note);
   persistEvalLog();
   renderPads();
   renderLog();
   renderChunkRows();
 }
 
-function noteChunk(key, label, note) {
+function noteChunk(key, chip, note) {
   const pad = activePad();
   const record = chunkRecord(key);
-  if (!record) return;
+  if (!record || !chip) return;
   if (!record.ratings) record.ratings = {};
-  const prev = record.ratings[label] || { verdict: null, note: "" };
-  record.ratings[label] = { verdict: prev.verdict || null, note };
-  const entry = findChunkEntry(pad.id, key) || upsertChunkLog(pad, record, currentTheme, { blockId: key });
-  rateChunkTag(entry, label, prev.verdict || null, note);
+  const prev = record.ratings[chip.key] || { verdict: null, note: "" };
+  record.ratings[chip.key] = { verdict: prev.verdict || null, note };
+  const entry = findChunkEntry(pad.id, key) || upsertChunkLog(pad, record, { blockId: key });
+  rateChunkTag(entry, chip.label, prev.verdict || null, note);
   persistEvalLog();
 }
 
@@ -649,7 +687,7 @@ function markShouldNotSplit(key, value) {
   const record = chunkRecord(key);
   if (!record || !record.split) return;
   record.split.shouldNotSplit = value ? true : null;
-  const entry = upsertChunkLog(pad, record, currentTheme, {
+  const entry = upsertChunkLog(pad, record, {
     newMemoNudge: value ? "no" : null,
     blockId: key,
   });
@@ -694,7 +732,7 @@ function confirmNewMemo() {
   const pad = session.pads.find((item) => item.id === draft.sourcePadId);
   const record = pad && pad.chunkMap && pad.chunkMap[draft.sourceChunkKey];
   if (pad && record) {
-    upsertChunkLog(pad, record, currentTheme, {
+    upsertChunkLog(pad, record, {
       chipChosen: "새 메모로 열기",
       newMemoNudge: "yes",
       blockId: draft.sourceBlockId,
@@ -940,30 +978,24 @@ async function judgeChunkText(text, priors, earlier) {
 
 function paintThemeMeta(result) {
   if (!result) {
-    els.themeMeta.textContent = "Theme judge idle.";
+    els.themeMeta.textContent = "";
     return;
   }
   const conf = typeof result.confidence === "number" ? result.confidence.toFixed(3) : "—";
   const err = result.error ? ` · ${result.error}` : "";
-  const invent = result.inventedLabelAfter
-    ? ` · invented ${result.inventedLabelAfter}`
-    : result.needsTitle
-      ? " · awaiting short title"
-      : "";
   const split = result.splitKind === "nudge"
     ? " · drift"
     : result.splitKind === "candidate"
       ? " · kept together"
       : "";
-  els.themeMeta.textContent = `${result.label || result.method || "theme"} · confidence ${conf}${result.lowConfidence ? " · low confidence" : ""}${split}${invent}${err}`;
+  els.themeMeta.textContent = `${result.label || result.method || "theme"} · confidence ${conf}${result.lowConfidence ? " · low confidence" : ""}${split}${err}`;
 }
 
 async function runThemePropose() {
   const pad = activePad();
   const rows = projectChunkBoard(pad, pad.text);
   if (!rows.length) {
-    currentTheme = null;
-    els.themeMeta.textContent = "Theme judge idle.";
+    els.themeMeta.textContent = "";
     renderChunkRows();
     return;
   }
@@ -981,22 +1013,35 @@ async function runThemePropose() {
         .map((item) => item.block.text);
       const priors = collectPriorThemes(pad, earlier);
       els.themeMeta.textContent = "Scoring chunks…";
-      let result = await judgeChunkText(row.block.text, priors, earlier);
+      const judged = await judgeChunkText(row.block.text, priors, earlier);
       if (seq !== themeSeq) return;
-      result = await maybeInventTitle(result, { text: row.block.text }, priors);
-      if (seq !== themeSeq) return;
-      if (!result.error) {
-        result = withProductSplit(result, row.block.text, earlier, priors);
-      }
-      result.judgedText = row.block.text;
-      for (const theme of result.themes || []) {
-        if (theme.label) rememberSessionTheme(theme.label, row.block.text);
-      }
-      applyChunkJudgment(row.record, result);
-      showError(result.error || "");
-      currentTheme = result;
-      upsertChunkLog(pad, row.record, result, { blockId: row.block.id });
-      paintThemeMeta(result);
+      const split = withProductSplit(judged, row.block.text, earlier, priors);
+      const textUnchanged =
+        Boolean(row.record.judgedText) &&
+        normalizeText(row.record.judgedText) === normalizeText(row.block.text);
+      row.record.split = {
+        kind: split.splitKind,
+        legacyWouldNudge: split.legacyWouldNudge,
+        falsePositive: split.falsePositive,
+        shouldNotSplit: textUnchanged ? row.record.split.shouldNotSplit : null,
+      };
+      if (!row.record.theme) row.record.theme = themeFromLegacy(row.record);
+      row.record.theme = proposeTheme(row.record.theme, {
+        chunkText: row.block.text,
+        judged,
+        priors,
+        earlierTexts: earlier,
+      });
+      row.record.stickyLabel = choiceLabel(row.record.theme);
+      row.record.judgedText = row.block.text;
+      showError(judged.error || "");
+      upsertChunkLog(pad, row.record, {
+        blockId: row.block.id,
+        confidence: split.confidence,
+        method: split.method,
+        model: split.model,
+      });
+      paintThemeMeta(split);
       renderChunkRows();
     }
   } catch (err) {
@@ -1234,11 +1279,10 @@ els.clearQueryBtn.onclick = () => {
   pad.chunkMap = {};
   pad.chunkSeq = 0;
   currentRun = null;
-  currentTheme = null;
   showError("");
   setBadge("idle");
   els.resultMeta.textContent = "No search yet.";
-  els.themeMeta.textContent = "Theme judge idle.";
+  els.themeMeta.textContent = "";
   loadPadIntoEditor();
   renderResults();
 };
