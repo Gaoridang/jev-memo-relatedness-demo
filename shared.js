@@ -841,18 +841,93 @@ function makeThemeChunkEvalEntry({
   };
 }
 
-function rateChunkTag(entry, label, verdict, note) {
+function isChoiceId(key) {
+  return typeof key === "string" && /^(parent|child|fallback):/.test(key);
+}
+
+function canonicalRatings(ratings) {
+  const next = {};
+  const rows = Object.entries(ratings || {}).filter(
+    ([, rating]) => rating && typeof rating === "object"
+  );
+  const idLabels = new Set();
+  for (const [key, rating] of rows) {
+    if (!isChoiceId(key)) continue;
+    const label = normalizeText(rating.label);
+    if (label) idLabels.add(label);
+    next[key] = {
+      verdict: rating.verdict === "yes" || rating.verdict === "no" ? rating.verdict : null,
+      note: typeof rating.note === "string" ? rating.note : "",
+      label,
+    };
+  }
+  for (const [key, rating] of rows) {
+    if (isChoiceId(key) || idLabels.has(key)) continue;
+    next[key] = {
+      verdict: rating.verdict === "yes" || rating.verdict === "no" ? rating.verdict : null,
+      note: typeof rating.note === "string" ? rating.note : "",
+      label: key,
+    };
+  }
+  return next;
+}
+
+function rateChunkTag(entry, id, verdict, note, label) {
   if (!entry || entry.kind !== "theme_chunk") return entry;
-  const clean = normalizeText(label);
-  if (!clean) return entry;
+  const cleanId = normalizeText(id);
+  if (!cleanId) return entry;
   if (!entry.ratings || typeof entry.ratings !== "object") entry.ratings = {};
-  const prev = entry.ratings[clean] || { verdict: null, note: "" };
+  const display = normalizeText(label);
+  if (display && display !== cleanId) delete entry.ratings[display];
+  const prev = entry.ratings[cleanId] || { verdict: null, note: "", label: display };
   const nextVerdict =
     verdict === "yes" || verdict === "no" || verdict === null ? verdict : prev.verdict;
   const nextNote = note === undefined ? prev.note || "" : String(note);
-  entry.ratings[clean] = { verdict: nextVerdict, note: nextNote };
-  if (nextVerdict === "yes") entry.chipChosen = clean;
+  entry.ratings[cleanId] = {
+    verdict: nextVerdict,
+    note: nextNote,
+    label: display || prev.label || "",
+  };
+  if (nextVerdict === "yes") entry.chipChosen = entry.ratings[cleanId].label || cleanId;
   entry.ratedAt = new Date().toISOString();
+  return entry;
+}
+
+function openThemeChunkEntry(entries, fields, touch) {
+  const list = entries || [];
+  const opts = touch || {};
+  const padId = fields && fields.padId ? fields.padId : null;
+  const chunkKey = fields && fields.chunkKey ? fields.chunkKey : null;
+  let entry = null;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const row = list[i];
+    if (row && row.kind === "theme_chunk" && row.padId === padId && row.chunkKey === chunkKey) {
+      entry = row;
+      break;
+    }
+  }
+  if (!entry) {
+    entry = makeThemeChunkEvalEntry(fields || {});
+    list.push(entry);
+    return entry;
+  }
+  entry.chunk = String((fields && fields.chunk) || "");
+  entry.proposals = (fields && fields.proposals) || [];
+  entry.activeChunkId = fields.activeChunkId || entry.activeChunkId;
+  entry.ratings = fields.ratings && typeof fields.ratings === "object" ? fields.ratings : {};
+  entry.stickyLabel = fields.stickyLabel || null;
+  entry.chipChosen = fields.chipChosen == null ? null : fields.chipChosen;
+  entry.splitKind = fields.splitKind || "none";
+  entry.legacyWouldNudge = Boolean(fields.legacyWouldNudge);
+  entry.falsePositive = Boolean(fields.falsePositive);
+  entry.inventedLabelBefore = fields.inventedLabelBefore == null ? null : fields.inventedLabelBefore;
+  entry.inventedLabelAfter = fields.inventedLabelAfter == null ? null : fields.inventedLabelAfter;
+  entry.needsTitle = Boolean(fields.needsTitle);
+  if (opts.touchConfidence) entry.confidence = fields.confidence;
+  if (opts.touchMethod) entry.method = fields.method;
+  if (opts.touchModel) entry.model = fields.model;
+  if (fields.shouldNotSplit === true) entry.shouldNotSplit = true;
+  if (opts.newMemoNudge === "yes" || opts.newMemoNudge === "no") entry.newMemoNudge = opts.newMemoNudge;
   return entry;
 }
 
@@ -927,8 +1002,10 @@ function visibleChunkTags(record) {
   }
   const pinned = [];
   if (record && record.stickyLabel) pinned.push(record.stickyLabel);
-  for (const [label, rating] of Object.entries((record && record.ratings) || {})) {
-    if (rating && (rating.verdict || rating.note)) pinned.push(label);
+  for (const [key, rating] of Object.entries((record && record.ratings) || {})) {
+    if (!rating || (!rating.verdict && !rating.note)) continue;
+    if (isChoiceId(key) && rating.label) pinned.push(rating.label);
+    else if (!isChoiceId(key)) pinned.push(normalizeText(rating.label) || key);
   }
   for (const label of pinned) {
     if (!label || seen.has(label)) continue;
@@ -1025,7 +1102,24 @@ function beginNewMemoDraft(session, source) {
     sourceBlockId: source.blockId,
     seedText: record.text,
     body: record.text,
+    assignedThemeLabel: pad.assignedThemeLabel || record.stickyLabel || null,
+    stickyLabel: record.stickyLabel || null,
+    theme: record.theme ? JSON.parse(JSON.stringify(record.theme)) : null,
+    ratings: canonicalRatings(record.ratings),
+    proposals: Array.isArray(record.proposals) ? JSON.parse(JSON.stringify(record.proposals)) : [],
+    split: record.split ? { ...record.split } : null,
   };
+}
+
+function exciseBlockText(text, blockId) {
+  const kept = splitBlocks(text).filter((block) => block.id !== blockId && normalizeText(block.text));
+  return kept.map((block) => String(block.text).replace(/^\s+|\s+$/g, "")).join("\n\n");
+}
+
+function copyChunkMap(chunkMap) {
+  const next = {};
+  for (const [key, record] of Object.entries(chunkMap || {})) next[key] = record;
+  return next;
 }
 
 function commitNewMemoDraft(session, draft) {
@@ -1039,14 +1133,45 @@ function commitNewMemoDraft(session, draft) {
   ) {
     return { ok: false, session };
   }
+  const source = session.pads.find((item) => item.id === draft.sourcePadId);
+  const sourceCopy = source
+    ? {
+        id: source.id,
+        text: exciseBlockText(source.text, draft.sourceBlockId),
+        caret: 0,
+        assignedThemeLabel: source.assignedThemeLabel || null,
+        chunkMap: copyChunkMap(source.chunkMap),
+        chunkSeq: source.chunkSeq || 0,
+      }
+    : null;
+  if (sourceCopy && draft.sourceChunkKey) delete sourceCopy.chunkMap[draft.sourceChunkKey];
   const pad = createPad({
     id: nextPadId(session.pads),
     text: draft.body,
     caret: draft.body.length,
+    assignedThemeLabel: draft.assignedThemeLabel || null,
   });
+  if (normalizeText(draft.body)) {
+    const record = emptyChunkRecord("c01");
+    record.text = draft.body;
+    record.stickyLabel = draft.stickyLabel || null;
+    if (draft.theme) record.theme = draft.theme;
+    record.ratings = canonicalRatings(draft.ratings);
+    record.proposals = Array.isArray(draft.proposals) ? draft.proposals.slice() : [];
+    record.split = {
+      kind: "none",
+      legacyWouldNudge: false,
+      falsePositive: false,
+      shouldNotSplit: null,
+    };
+    if (draft.body === draft.seedText) record.judgedText = draft.body;
+    pad.chunkMap = { c01: record };
+    pad.chunkSeq = 1;
+  }
+  const pads = session.pads.map((item) => (sourceCopy && item.id === sourceCopy.id ? sourceCopy : item));
   const next = {
-    pads: session.pads.concat(pad),
-    activePadId: session.activePadId,
+    pads: pads.concat(pad),
+    activePadId: pad.id,
   };
   draft.consumed = true;
   return { ok: true, session: next, padId: pad.id };
@@ -1208,6 +1333,8 @@ const exported = {
   applyChunkJudgment,
   beginNewMemoDraft,
   commitNewMemoDraft,
+  openThemeChunkEntry,
+  canonicalRatings,
   mergePasteCards,
   movePasteCard,
   detachPasteCard,

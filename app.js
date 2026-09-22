@@ -245,10 +245,11 @@ function formatScore(score) {
 
 function formatTagRatings(ratings) {
   const parts = [];
-  for (const [label, rating] of Object.entries(ratings || {})) {
+  for (const [key, rating] of Object.entries(ratings || {})) {
     if (!rating || (!rating.verdict && !rating.note)) continue;
+    const name = rating.label || key;
     const note = rating.note ? ` "${rating.note}"` : "";
-    parts.push(`${label} ${rating.verdict || "note"}${note}`);
+    parts.push(`${name} ${rating.verdict || "note"}${note}`);
   }
   return parts.length ? ` · ${parts.join(", ")}` : "";
 }
@@ -433,31 +434,12 @@ function upsertChunkLog(pad, record, extra) {
     falsePositive: split.falsePositive,
     shouldNotSplit: split.shouldNotSplit === true ? true : null,
   };
-  let entry = findChunkEntry(pad.id, record.key);
-  if (!entry || entry.chunk !== record.text) {
-    entry = makeThemeChunkEvalEntry(fields);
-    evalLog.push(entry);
-  } else {
-    entry.proposals = fields.proposals;
-    if (has("confidence")) entry.confidence = meta.confidence;
-    if (has("method")) entry.method = meta.method;
-    if (has("model")) entry.model = meta.model;
-    entry.chunk = fields.chunk;
-    entry.activeChunkId = fields.activeChunkId;
-    entry.inventedLabelBefore = projected.inventedLabelBefore;
-    entry.inventedLabelAfter = projected.inventedLabelAfter;
-    entry.needsTitle = projected.needsTitle;
-    entry.ratings = fields.ratings;
-    entry.stickyLabel = projected.stickyLabel;
-    entry.chipChosen = projected.chipChosen;
-    entry.splitKind = fields.splitKind;
-    entry.legacyWouldNudge = fields.legacyWouldNudge;
-    entry.falsePositive = fields.falsePositive;
-    if (fields.shouldNotSplit === true) entry.shouldNotSplit = true;
-    if (meta.newMemoNudge === "yes" || meta.newMemoNudge === "no") {
-      entry.newMemoNudge = meta.newMemoNudge;
-    }
-  }
+  const entry = openThemeChunkEntry(evalLog, fields, {
+    touchConfidence: has("confidence"),
+    touchMethod: has("method"),
+    touchModel: has("model"),
+    newMemoNudge: meta.newMemoNudge,
+  });
   if (meta.chipChosen !== undefined) {
     setThemeChunkChoice(entry, meta.chipChosen, meta.newMemoNudge);
     entry.chipChosen = meta.chipChosen;
@@ -650,8 +632,9 @@ function rateChunk(key, chip, verdict) {
   const record = chunkRecord(key);
   if (!record || !chip) return;
   if (!record.ratings) record.ratings = {};
-  const prev = record.ratings[chip.key] || { verdict: null, note: "" };
-  record.ratings[chip.key] = { verdict, note: prev.note || "" };
+  const prev = record.ratings[chip.key] || { verdict: null, note: "", label: chip.label };
+  if (chip.label && chip.label !== chip.key) delete record.ratings[chip.label];
+  record.ratings[chip.key] = { verdict, note: prev.note || "", label: chip.label || "" };
   if (verdict === "yes" && chip.choice) {
     if (!record.theme) record.theme = themeFromLegacy(record);
     record.theme = commitPick(record.theme, chip.choice, record.text);
@@ -663,7 +646,7 @@ function rateChunk(key, chip, verdict) {
     }
   }
   const entry = upsertChunkLog(pad, record, { blockId: key });
-  rateChunkTag(entry, chip.label, verdict, record.ratings[chip.key].note);
+  rateChunkTag(entry, chip.key, verdict, record.ratings[chip.key].note, chip.label);
   persistEvalLog();
   renderPads();
   renderLog();
@@ -675,10 +658,11 @@ function noteChunk(key, chip, note) {
   const record = chunkRecord(key);
   if (!record || !chip) return;
   if (!record.ratings) record.ratings = {};
-  const prev = record.ratings[chip.key] || { verdict: null, note: "" };
-  record.ratings[chip.key] = { verdict: prev.verdict || null, note };
+  const prev = record.ratings[chip.key] || { verdict: null, note: "", label: chip.label };
+  if (chip.label && chip.label !== chip.key) delete record.ratings[chip.label];
+  record.ratings[chip.key] = { verdict: prev.verdict || null, note, label: chip.label || prev.label || "" };
   const entry = findChunkEntry(pad.id, key) || upsertChunkLog(pad, record, { blockId: key });
-  rateChunkTag(entry, chip.label, prev.verdict || null, note);
+  rateChunkTag(entry, chip.key, prev.verdict || null, note, chip.label);
   persistEvalLog();
 }
 
@@ -711,7 +695,7 @@ function openNewMemo(row) {
   els.newMemoModal.hidden = false;
   const end = draft.body.length;
   els.newMemoBody.setSelectionRange(end, end);
-  document.querySelector(".wrap").inert = true;
+  document.querySelector("#appShell").inert = true;
   els.newMemoBody.focus();
   els.newMemoBody.setSelectionRange(end, end);
 }
@@ -720,25 +704,26 @@ function confirmNewMemo() {
   if (!newMemoDraft) return;
   newMemoDraft.body = els.newMemoBody.value;
   const draft = newMemoDraft;
-  const result = commitNewMemoDraft(session, draft);
-  newMemoDraft = null;
-  els.newMemoModal.hidden = true;
-  document.querySelector(".wrap").inert = false;
-  if (!result.ok) {
-    els.query.focus();
-    return;
-  }
-  session = result.session;
-  const pad = session.pads.find((item) => item.id === draft.sourcePadId);
-  const record = pad && pad.chunkMap && pad.chunkMap[draft.sourceChunkKey];
-  if (pad && record) {
-    upsertChunkLog(pad, record, {
+  const source = session.pads.find((item) => item.id === draft.sourcePadId);
+  const record = source && source.chunkMap && source.chunkMap[draft.sourceChunkKey];
+  if (source && record) {
+    upsertChunkLog(source, record, {
       chipChosen: "새 메모로 열기",
       newMemoNudge: "yes",
       blockId: draft.sourceBlockId,
     });
   }
-  renderPads();
+  const result = commitNewMemoDraft(session, draft);
+  newMemoDraft = null;
+  els.newMemoModal.hidden = true;
+  document.querySelector("#appShell").inert = false;
+  if (!result.ok) {
+    els.query.focus();
+    return;
+  }
+  session = result.session;
+  loadPadIntoEditor();
+  scheduleTheme();
   els.query.focus();
 }
 
@@ -746,7 +731,7 @@ function dismissNewMemo() {
   if (!newMemoDraft) return;
   newMemoDraft = null;
   els.newMemoModal.hidden = true;
-  document.querySelector(".wrap").inert = false;
+  document.querySelector("#appShell").inert = false;
   els.query.focus();
 }
 
