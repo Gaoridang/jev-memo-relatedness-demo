@@ -16,7 +16,9 @@ The corpus fixture is `fixtures/korean-memo-relatedness-30.json` (filename kept;
 
 With a TypeSafe key (`JEV_API_KEY` on Vercel and/or localStorage `jev_api_key`) the page sends `{ mode: "theme_chunk", chunk, priorThemes }` to `/api/jev` (or TypeSafe from the browser). The request is Noul per prior theme plus `new_topic` and `none_topic`. The model is the account default `jev-latest`. Failures show the real HTTP or parse error. There are no mocks.
 
-With no key, chips use the labeled keyword / overlap baseline (`method: heuristic`).
+Chip labels never come from chunk word prefixes. The judge first matches **session priors + a fixed Korean theme vocab**. If there is still no good match and an OpenAI key is present (`OPENAI_API_KEY` on Vercel and/or localStorage `openai_api_key`), the page calls Chat Completions with Sol (`gpt-5.6-sol`) to invent a **short theme title**, then stores that label in session priors. Without an OpenAI key, unmatched chunks only offer **기타** / **없음**.
+
+With no Jev key, theme match uses the labeled keyword / vocab baseline (`method: heuristic`).
 
 ## Accordion fallback
 
@@ -54,6 +56,9 @@ Stored in `localStorage` as `memoRelatednessEvalLog`. One array. Export JSON or 
 - `newMemoNudge` (`yes` | `no` | `null`)
 - `padId`
 - `activeChunkId`
+- `inventedLabelBefore` / `inventedLabelAfter` (when a short title is invented)
+- `needsTitle`
+- `labelSource`
 
 The page does not invent ground-truth scores against the corpus.
 
@@ -76,7 +81,7 @@ Import `Gaoridang/jev-memo-relatedness-demo` in the Vercel dashboard, or push to
 
 Public URL (after deploy): `https://jev-memo-relatedness-demo.vercel.app`
 
-## Where the key goes
+## Where the keys go
 
 Use only these names. Do not commit values.
 
@@ -84,9 +89,11 @@ Use only these names. Do not commit values.
 | --- | --- | --- | --- |
 | Vercel env | `JEV_API_KEY` | Operator, in the Vercel dashboard | `POST /api/jev` → TypeSafe `POST /v1/systemone` |
 | Browser localStorage | `jev_api_key` | Operator, in the on-page field | Browser `fetch` to TypeSafe. Never posted to this site. |
+| Vercel env | `OPENAI_API_KEY` | Operator, in the Vercel dashboard | `POST /api/llm` → OpenAI Chat Completions (`gpt-5.6-sol`) for short theme titles |
+| Browser localStorage | `openai_api_key` | Operator, in the on-page field | Browser `fetch` to OpenAI for invent titles. Never posted to this site. |
 
-If Vercel env `JEV_API_KEY` is set, live calls use `/api/jev`. The browser field stays in localStorage and is not posted to this site. A localStorage key is used only when the env is absent.
+If Vercel env `JEV_API_KEY` is set, live Jev calls use `/api/jev`. If `OPENAI_API_KEY` is set, invent-title calls use `/api/llm`. Browser fields stay in localStorage and are not posted to this site. A localStorage key is used only when the matching env is absent.
 
-A browser call can fail with a CORS error from TypeSafe. The UI shows that error. The Vercel env path avoids browser CORS.
+A browser call can fail with a CORS error from TypeSafe or OpenAI. The UI shows that error. The Vercel env path avoids browser CORS.
 
 The functions do not log header or env values.

@@ -248,6 +248,51 @@ function parseRelatednessAnswers(payload, candidates) {
 const THEME_HEURISTIC_LOW = 0.35;
 const THEME_HEURISTIC_DRIFT = 0.28;
 const THEME_LIVE_LOW = 0.45;
+const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
+const OPENAI_MODEL = "gpt-5.6-sol";
+
+const THEME_VOCAB = Object.freeze([
+  {
+    label: "집안일",
+    keywords: ["빨래", "세탁", "건조기", "세탁기", "청소", "설거지", "분리수거", "쓰레기", "걸레", "수건"],
+  },
+  {
+    label: "미팅",
+    keywords: ["미팅", "회의", "standup", "sync", "콜", "화상", "1:1", "인터뷰"],
+  },
+  {
+    label: "식사",
+    keywords: ["밥", "점심", "저녁", "아침", "김밥", "삼각김밥", "우유", "카페", "커피", "맛집", "배달"],
+  },
+  {
+    label: "차량",
+    keywords: ["엔진오일", "자동차", "주차", "타이어", "정비", "공임", "주유", "세차"],
+  },
+  {
+    label: "여행",
+    keywords: ["여행", "숙박", "호텔", "케이블카", "항공", "기차", "관광", "금오산"],
+  },
+  {
+    label: "운동",
+    keywords: ["운동", "헬스", "러닝", "조깅", "헬스장", "스트레칭", "땀"],
+  },
+  {
+    label: "쇼핑",
+    keywords: ["쇼핑", "구매", "주문", "쿠팡", "배송", "장보기", "할인"],
+  },
+  {
+    label: "업무",
+    keywords: ["업무", "프로젝트", "마감", "배포", "pr", "버그", "코드", "데모"],
+  },
+  {
+    label: "건강",
+    keywords: ["병원", "약", "아프", "통증", "수면", "피곤", "검진"],
+  },
+  {
+    label: "금융",
+    keywords: ["카드", "결제", "이체", "급여", "예산", "통장", "세금"],
+  },
+]);
 
 const THEME_MATCH_INSTRUCTIONS =
   "Does this active memo chunk belong to the given theme label? True if the chunk is about that theme. False if it is a different subject.";
@@ -325,10 +370,41 @@ function activeChunkAt(text, caret) {
   return { blocks, active, earlier };
 }
 
-function inventThemeLabel(chunk) {
-  const words = String(chunk || "").match(/[가-힣]{2,}|[a-zA-Z0-9]{2,}/g) || [];
-  if (!words.length) return "주제";
-  return words.slice(0, 3).join(" ");
+function isChunkPrefixLabel(label, chunk) {
+  const l = normalizeText(label);
+  const c = normalizeText(chunk);
+  if (!l || !c) return false;
+  if (l === c) return true;
+  if (c.startsWith(l) && l.length >= 4) return true;
+  const words = c.match(/[가-힣]{2,}|[a-zA-Z0-9]{2,}/g) || [];
+  if (!words.length) return false;
+  const prefix = words.slice(0, 3).join(" ");
+  return l === prefix;
+}
+
+function matchFixedThemeVocab(chunk) {
+  const text = String(chunk || "").toLowerCase();
+  if (!normalizeText(text)) return { label: null, score: 0, hits: [] };
+  let best = null;
+  for (let i = 0; i < THEME_VOCAB.length; i += 1) {
+    const entry = THEME_VOCAB[i];
+    const hits = entry.keywords.filter((kw) => text.includes(String(kw).toLowerCase()));
+    if (!hits.length) continue;
+    const score = Math.min(0.95, 0.42 + hits.length * 0.12);
+    if (!best || score > best.score) {
+      best = { label: entry.label, score: Number(score.toFixed(4)), hits, id: `vocab_${i}` };
+    }
+  }
+  return best || { label: null, score: 0, hits: [] };
+}
+
+function safeThemeLabel(label, chunk) {
+  const trimmed = normalizeText(label);
+  if (!trimmed) return null;
+  if (trimmed === "기타" || trimmed === "없음") return trimmed;
+  if (isChunkPrefixLabel(trimmed, chunk)) return null;
+  if (trimmed.length > 24) return null;
+  return trimmed;
 }
 
 function pairOverlap(a, b) {
@@ -358,7 +434,9 @@ function proposeThemesHeuristic(chunk, priorThemes, earlierTexts) {
     const prev = earlier[i];
     const score = pairOverlap(c, prev);
     maxEarlier = Math.max(maxEarlier, score);
-    const label = inventThemeLabel(prev);
+    const vocab = matchFixedThemeVocab(prev);
+    const label = vocab.label;
+    if (!label) continue;
     const existing = themes.find((theme) => theme.label === label);
     if (existing) {
       existing.score = Number(Math.max(existing.score, score).toFixed(4));
@@ -370,22 +448,29 @@ function proposeThemesHeuristic(chunk, priorThemes, earlierTexts) {
       });
     }
   }
-  const bestPriorMatch = Math.max(bestPrior, maxEarlier);
-  const earlierExists = earlier.length > 0 || priors.length > 0;
-  if (normalizeText(c) && (themes.length === 0 || bestPriorMatch < THEME_HEURISTIC_LOW)) {
-    themes.push({
-      id: "invented",
-      label: inventThemeLabel(c),
-      score: Number(bestPriorMatch.toFixed(4)),
-    });
+  const vocab = matchFixedThemeVocab(c);
+  if (vocab.label) {
+    const existing = themes.find((theme) => theme.label === vocab.label);
+    if (existing) {
+      existing.score = Number(Math.max(existing.score, vocab.score).toFixed(4));
+    } else {
+      themes.push({
+        id: vocab.id || "vocab",
+        label: vocab.label,
+        score: vocab.score,
+      });
+    }
   }
   themes.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     return String(a.id).localeCompare(String(b.id));
   });
   const confidence = themes.length ? themes[0].score : 0;
+  const earlierExists = earlier.length > 0 || priors.length > 0;
+  const bestPriorMatch = Math.max(bestPrior, maxEarlier);
   const lowConfidence = confidence < THEME_HEURISTIC_LOW || !normalizeText(c);
   const drift = earlierExists && bestPriorMatch < THEME_HEURISTIC_DRIFT;
+  const needsTitle = Boolean(normalizeText(c)) && (themes.length === 0 || confidence < THEME_HEURISTIC_LOW);
   return {
     ok: true,
     method: "heuristic",
@@ -393,6 +478,7 @@ function proposeThemesHeuristic(chunk, priorThemes, earlierTexts) {
     confidence: Number(confidence.toFixed(4)),
     lowConfidence,
     drift,
+    needsTitle,
     themes,
   };
 }
@@ -476,29 +562,39 @@ function parseThemeChunkAnswers(payload, priorThemes, chunk) {
   const chunkText =
     chunk ||
     (payload.state && typeof payload.state.active_chunk === "string" ? payload.state.active_chunk : "");
-  if (newAns.noul >= 0.35) {
-    themes.push({
-      id: "invented",
-      label: inventThemeLabel(chunkText),
-      score: Number(newAns.noul.toFixed(4)),
-    });
+  const vocab = matchFixedThemeVocab(chunkText);
+  if (vocab.label && vocab.score >= 0.42) {
+    const existing = themes.find((theme) => theme.label === vocab.label);
+    if (existing) {
+      existing.score = Number(Math.max(existing.score, vocab.score).toFixed(4));
+    } else {
+      themes.push({
+        id: vocab.id || "vocab",
+        label: vocab.label,
+        score: vocab.score,
+      });
+    }
   }
   themes.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     return String(a.id).localeCompare(String(b.id));
   });
+  const bestAfterVocab = themes.length ? themes[0].score : 0;
   const topTheme = themes.length ? themes[0].score : noneAns.noul;
-  const confidence = Math.max(topTheme, noneAns.noul * 0.5);
-  const lowConfidence = topTheme < THEME_LIVE_LOW || noneAns.noul >= 0.5;
+  const confidence = Math.max(topTheme, noneAns.noul * 0.5, newAns.noul * 0.5);
+  const lowConfidence = bestAfterVocab < THEME_LIVE_LOW || noneAns.noul >= 0.5;
   const drift = priors.length > 0 && newAns.noul >= 0.5 && bestPriorTheme < 0.55;
+  const needsTitle =
+    newAns.noul >= 0.35 && (themes.length === 0 || bestAfterVocab < THEME_LIVE_LOW);
   return {
     ok: true,
     method: "live_jev",
     label: "live TypeSafe Jev (noul)",
     model: typeof payload.model === "string" ? payload.model : null,
-    confidence: Number(Math.max(topTheme, confidence).toFixed(4)),
-    lowConfidence,
+    confidence: Number(Math.max(topTheme, confidence, needsTitle ? newAns.noul : 0).toFixed(4)),
+    lowConfidence: needsTitle ? true : lowConfidence,
     drift,
+    needsTitle,
     themes,
     noneScore: Number(noneAns.noul.toFixed(4)),
     newScore: Number(newAns.noul.toFixed(4)),
@@ -508,10 +604,13 @@ function parseThemeChunkAnswers(payload, priorThemes, chunk) {
 function buildThemeChips(result) {
   const chips = [];
   const seen = new Set();
+  const chunk = result && typeof result.chunkText === "string" ? result.chunkText : "";
   for (const theme of (result && result.themes) || []) {
     if (!theme.label || seen.has(theme.label)) continue;
-    seen.add(theme.label);
-    chips.push({ id: theme.id, label: theme.label, kind: "theme", score: theme.score });
+    const label = chunk ? safeThemeLabel(theme.label, chunk) : normalizeText(theme.label);
+    if (!label || label === "기타" || label === "없음") continue;
+    seen.add(label);
+    chips.push({ id: theme.id, label, kind: "theme", score: theme.score });
   }
   if (result && result.lowConfidence) {
     chips.push({ id: "기타", label: "기타", kind: "기타", score: null });
@@ -521,6 +620,12 @@ function buildThemeChips(result) {
     chips.push({ id: "새메모", label: "새 메모로 열기", kind: "새메모", score: null });
   }
   return chips;
+}
+
+function pasteThemeLabel(text) {
+  const vocab = matchFixedThemeVocab(text);
+  if (vocab.label) return vocab.label;
+  return "기타";
 }
 
 function proposePasteStructure(text) {
@@ -539,12 +644,93 @@ function proposePasteStructure(text) {
     if (!placed) {
       themes.push({
         id: `theme_${themes.length + 1}`,
-        label: inventThemeLabel(block.text),
+        label: pasteThemeLabel(block.text),
         cards: [{ id: block.id, text: block.text }],
       });
     }
   }
   return { themes, blockCount: blocks.length };
+}
+
+function buildThemeTitleBody(chunk, priorLabels) {
+  const priors = (priorLabels || []).filter((label) => normalizeText(label));
+  const vocab = THEME_VOCAB.map((entry) => entry.label).join(", ");
+  return {
+    model: OPENAI_MODEL,
+    reasoning_effort: "none",
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "Invent a short theme title for a memo chunk. Reply with JSON " +
+          '{"title":"<short theme title>","reason":"<short>"}. ' +
+          "Title rules: noun phrase, about 2 to 8 Korean characters or a few words, not a sentence, " +
+          "never copy the chunk word-for-word or its first few tokens. " +
+          `Prefer reusing one of these when it fits: ${vocab}` +
+          (priors.length ? `. Existing session themes: ${priors.join(", ")}.` : "."),
+      },
+      { role: "user", content: String(chunk || "") },
+    ],
+  };
+}
+
+function parseThemeTitleResponse(payload, chunk) {
+  if (!payload || typeof payload !== "object") {
+    return { ok: false, error: "OpenAI body is not a JSON object" };
+  }
+  const content =
+    payload.choices && payload.choices[0] && payload.choices[0].message
+      ? payload.choices[0].message.content
+      : null;
+  if (typeof content !== "string" || !content.trim()) {
+    return { ok: false, error: "OpenAI body has no message content" };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch (err) {
+    return { ok: false, error: "OpenAI content is not JSON" };
+  }
+  if (!parsed || typeof parsed.title !== "string") {
+    return { ok: false, error: "OpenAI JSON has no title string" };
+  }
+  const title = safeThemeLabel(parsed.title, chunk);
+  if (!title || title === "기타" || title === "없음") {
+    return { ok: false, error: "OpenAI title is empty, too long, or a chunk fragment" };
+  }
+  return {
+    ok: true,
+    title,
+    reason: typeof parsed.reason === "string" ? parsed.reason : "",
+    model: typeof payload.model === "string" ? payload.model : OPENAI_MODEL,
+  };
+}
+
+function applyInventedThemeTitle(result, title, score) {
+  if (!result || !title) return result;
+  const next = { ...result, themes: [...(result.themes || [])] };
+  const existing = next.themes.find((theme) => theme.label === title);
+  const inventedScore = typeof score === "number" ? score : result.newScore || 0.55;
+  if (existing) {
+    existing.score = Number(Math.max(existing.score || 0, inventedScore).toFixed(4));
+  } else {
+    next.themes.push({
+      id: "invented",
+      label: title,
+      score: Number(inventedScore.toFixed(4)),
+    });
+  }
+  next.themes.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return String(a.id).localeCompare(String(b.id));
+  });
+  next.needsTitle = false;
+  next.inventedLabelAfter = title;
+  next.confidence = Number(Math.max(next.confidence || 0, inventedScore).toFixed(4));
+  next.lowConfidence = next.confidence < (next.method === "live_jev" ? THEME_LIVE_LOW : THEME_HEURISTIC_LOW);
+  next.labelSource = "openai_sol";
+  return next;
 }
 
 function makeEvalEntry({ query, method, ranked, model, note }) {
@@ -578,6 +764,10 @@ function makeThemeChunkEvalEntry({
   padId,
   activeChunkId,
   model,
+  inventedLabelBefore,
+  inventedLabelAfter,
+  needsTitle,
+  labelSource,
 }) {
   return {
     kind: "theme_chunk",
@@ -596,6 +786,11 @@ function makeThemeChunkEvalEntry({
     newMemoNudge: newMemoNudge === "yes" || newMemoNudge === "no" ? newMemoNudge : null,
     padId: padId || null,
     activeChunkId: activeChunkId || null,
+    inventedLabelBefore:
+      inventedLabelBefore == null ? null : String(inventedLabelBefore),
+    inventedLabelAfter: inventedLabelAfter == null ? null : String(inventedLabelAfter),
+    needsTitle: Boolean(needsTitle),
+    labelSource: labelSource || null,
   };
 }
 
@@ -729,7 +924,7 @@ function detachPasteCard(structure, cardId) {
   }
   structure.themes.push({
     id,
-    label: inventThemeLabel(card.text),
+    label: pasteThemeLabel(card.text),
     cards: [card],
   });
   return structure;
@@ -768,6 +963,8 @@ function toEvalJsonl(entries) {
 const exported = {
   SYSTEMONE_URL,
   JEV_MODEL,
+  OPENAI_CHAT_URL,
+  OPENAI_MODEL,
   CORPUS_PATH,
   EXPECTED_COUNT,
   EXPECTED_IDS,
@@ -776,6 +973,7 @@ const exported = {
   THEME_HEURISTIC_LOW,
   THEME_HEURISTIC_DRIFT,
   THEME_LIVE_LOW,
+  THEME_VOCAB,
   RELATED_NOUL_INSTRUCTIONS,
   RELATED_NOUL_CRITERIA,
   isLongMemo,
@@ -790,14 +988,20 @@ const exported = {
   splitBlocks,
   countNonEmptyBlocks,
   activeChunkAt,
-  inventThemeLabel,
+  isChunkPrefixLabel,
+  matchFixedThemeVocab,
+  safeThemeLabel,
   pairOverlap,
   proposeThemesHeuristic,
   normalizePriorThemes,
   buildThemeChunkRequest,
   parseThemeChunkAnswers,
   buildThemeChips,
+  pasteThemeLabel,
   proposePasteStructure,
+  buildThemeTitleBody,
+  parseThemeTitleResponse,
+  applyInventedThemeTitle,
   makeEvalEntry,
   makeThemeChunkEvalEntry,
   setThemeChunkChoice,

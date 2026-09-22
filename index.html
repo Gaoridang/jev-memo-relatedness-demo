@@ -125,11 +125,13 @@ details.fallback summary{cursor:pointer;color:var(--accent-2)}
 
   <section class="panel">
     <div class="section">Keys</div>
-    <label for="jevKey">TypeSafe Jev key. Saved as localStorage <code>jev_api_key</code>. Never committed. Used for live theme chips and Find related.</label>
-    <input id="jevKey" type="password" autocomplete="off" placeholder="paste key here, or leave empty for the keyword baseline" />
+    <label for="jevKey">TypeSafe Jev key. Saved as localStorage <code>jev_api_key</code>. Never committed. Used for live theme match and Find related.</label>
+    <input id="jevKey" type="password" autocomplete="off" placeholder="paste Jev key, or leave empty for the keyword baseline" />
+    <label for="openaiKey" style="margin-top:10px">OpenAI key for inventing short theme titles (Sol / <code>gpt-5.6-sol</code>). Saved as localStorage <code>openai_api_key</code>. Never committed. Vercel may already have <code>OPENAI_API_KEY</code>.</label>
+    <input id="openaiKey" type="password" autocomplete="off" placeholder="optional; invent titles when no prior/vocab match" />
     <div class="row">
-      <button type="button" id="saveKeysBtn">Save local key</button>
-      <button type="button" class="ghost" id="clearKeysBtn">Clear local key</button>
+      <button type="button" id="saveKeysBtn">Save local keys</button>
+      <button type="button" class="ghost" id="clearKeysBtn">Clear local keys</button>
       <span class="meta" id="keyStatus"></span>
     </div>
     <p class="meta" id="pathStatus" style="margin-top:8px"></p>

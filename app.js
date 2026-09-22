@@ -1,9 +1,11 @@
 const LS_JEV = "jev_api_key";
+const LS_OPENAI = "openai_api_key";
 const LS_EVAL = "memoRelatednessEvalLog";
 const THEME_DEBOUNCE_MS = 350;
 
 const els = {
   jevKey: document.getElementById("jevKey"),
+  openaiKey: document.getElementById("openaiKey"),
   keyStatus: document.getElementById("keyStatus"),
   pathStatus: document.getElementById("pathStatus"),
   saveKeysBtn: document.getElementById("saveKeysBtn"),
@@ -39,11 +41,12 @@ const els = {
 };
 
 let memos = [];
-let serverStatus = { jevEnv: false };
+let serverStatus = { jevEnv: false, openaiEnv: false };
 let currentRun = null;
 let showAll = false;
 let evalLog = loadEvalLog();
 let session = createPadSession({ pad: { id: "p01", text: "" } });
+let sessionThemePriors = [];
 let themeTimer = null;
 let themeSeq = 0;
 let lastThemeEntry = null;
@@ -70,9 +73,19 @@ function localJevKey() {
   return (localStorage.getItem(LS_JEV) || "").trim();
 }
 
+function localOpenAiKey() {
+  return (localStorage.getItem(LS_OPENAI) || "").trim();
+}
+
 function livePath() {
   if (serverStatus.jevEnv) return { mode: "proxy" };
   if (localJevKey()) return { mode: "browser", key: localJevKey() };
+  return { mode: "none" };
+}
+
+function llmPath() {
+  if (serverStatus.openaiEnv) return { mode: "proxy" };
+  if (localOpenAiKey()) return { mode: "browser", key: localOpenAiKey() };
   return { mode: "none" };
 }
 
@@ -80,20 +93,41 @@ function activePad() {
   return session.pads.find((pad) => pad.id === session.activePadId) || session.pads[0];
 }
 
+function rememberSessionTheme(label, sample) {
+  const clean = normalizeText(label);
+  if (!clean || clean === "기타" || clean === "없음" || clean === "새 메모로 열기") return;
+  if (sessionThemePriors.some((theme) => theme.label === clean)) return;
+  sessionThemePriors.push({
+    id: `session_${sessionThemePriors.length + 1}`,
+    label: clean,
+    sample: sample || "",
+  });
+}
+
 function renderKeyStatus() {
   const parts = [];
   parts.push(localJevKey() ? "browser jev_api_key stored" : "no browser jev_api_key");
   parts.push(serverStatus.jevEnv ? "Vercel JEV_API_KEY present" : "Vercel JEV_API_KEY absent");
+  parts.push(localOpenAiKey() ? "browser openai_api_key stored" : "no browser openai_api_key");
+  parts.push(serverStatus.openaiEnv ? "Vercel OPENAI_API_KEY present" : "Vercel OPENAI_API_KEY absent");
   els.keyStatus.textContent = parts.join(" · ");
   const path = livePath();
+  const llm = llmPath();
+  const invent =
+    llm.mode === "proxy"
+      ? "New theme titles call /api/llm → OpenAI Chat Completions (gpt-5.6-sol)."
+      : llm.mode === "browser"
+        ? "New theme titles call OpenAI from the browser with openai_api_key (gpt-5.6-sol)."
+        : "No OpenAI key. Unmatched themes stay 기타/없음 (no chunk-prefix invent).";
   if (path.mode === "proxy") {
     els.pathStatus.textContent =
-      "Theme chips and Find related call /api/jev → TypeSafe POST /v1/systemone (live Noul).";
+      `Theme match via /api/jev → TypeSafe. ${invent}`;
   } else if (path.mode === "browser") {
     els.pathStatus.textContent =
-      "Theme chips and Find related call TypeSafe from the browser with jev_api_key (live Noul).";
+      `Theme match via TypeSafe with jev_api_key. ${invent}`;
   } else {
-    els.pathStatus.textContent = "No key. Theme chips and Find related use the labeled keyword/overlap baseline.";
+    els.pathStatus.textContent =
+      `No Jev key. Theme match uses labeled keyword/vocab baseline. ${invent}`;
   }
 }
 
@@ -317,17 +351,27 @@ function renderHighlight() {
 
 function collectPriorThemes(pad, earlier) {
   const themes = [];
+  const seen = new Set();
+  for (const prior of sessionThemePriors) {
+    if (!prior.label || seen.has(prior.label)) continue;
+    seen.add(prior.label);
+    themes.push({
+      id: prior.id || `session_${themes.length + 1}`,
+      label: prior.label,
+      sample: prior.sample || "",
+    });
+  }
   for (const other of session.pads) {
     if (other.id === pad.id) continue;
-    if (other.assignedThemeLabel) {
-      themes.push({
-        id: `pad_${other.id}`,
-        label: other.assignedThemeLabel,
-        sample: other.text,
-      });
-    }
+    if (!other.assignedThemeLabel || seen.has(other.assignedThemeLabel)) continue;
+    seen.add(other.assignedThemeLabel);
+    themes.push({
+      id: `pad_${other.id}`,
+      label: other.assignedThemeLabel,
+      sample: other.text,
+    });
   }
-  if (pad.assignedThemeLabel) {
+  if (pad.assignedThemeLabel && !seen.has(pad.assignedThemeLabel)) {
     themes.push({
       id: `self_${pad.id}`,
       label: pad.assignedThemeLabel,
@@ -371,13 +415,17 @@ function updateThemeLog(chipChosen, newMemoNudge) {
     padId: session.activePadId,
     activeChunkId: currentChunk ? currentChunk.id : null,
     model: currentTheme && currentTheme.model,
+    inventedLabelBefore: currentTheme && currentTheme.inventedLabelBefore,
+    inventedLabelAfter: currentTheme && currentTheme.inventedLabelAfter,
+    needsTitle: currentTheme && currentTheme.needsTitle,
+    labelSource: currentTheme && currentTheme.labelSource,
   });
 }
 
 function renderThemeUi(result, chunk, priors) {
   currentTheme = result;
   currentChunk = chunk;
-  const chips = buildThemeChips(result);
+  const chips = buildThemeChips({ ...result, chunkText: chunk.text });
   els.themeChips.innerHTML = "";
   const chosen = activePad().assignedThemeLabel;
   for (const chip of chips) {
@@ -396,7 +444,12 @@ function renderThemeUi(result, chunk, priors) {
   els.nudgeBar.hidden = !showNudge;
   const conf = typeof result.confidence === "number" ? result.confidence.toFixed(3) : "—";
   const err = result.error ? ` · ${result.error}` : "";
-  els.themeMeta.textContent = `${result.label || result.method} · confidence ${conf}${result.lowConfidence ? " · low confidence" : ""}${result.drift ? " · drift" : ""}${err}`;
+  const invent = result.inventedLabelAfter
+    ? ` · invented ${result.inventedLabelAfter}`
+    : result.needsTitle
+      ? " · awaiting short title"
+      : "";
+  els.themeMeta.textContent = `${result.label || result.method} · confidence ${conf}${result.lowConfidence ? " · low confidence" : ""}${result.drift ? " · drift" : ""}${invent}${err}`;
 }
 
 function onChip(chip) {
@@ -406,6 +459,9 @@ function onChip(chip) {
   }
   const pad = activePad();
   pad.assignedThemeLabel = chip.kind === "없음" ? null : chip.label;
+  if (chip.kind === "theme" && chip.label) {
+    rememberSessionTheme(chip.label, currentChunk ? currentChunk.text : pad.text);
+  }
   updateThemeLog(chip.label, null);
   renderPads();
   els.themeChips.querySelectorAll("button").forEach((btn) => {
@@ -539,6 +595,80 @@ function scheduleTheme() {
   }, THEME_DEBOUNCE_MS);
 }
 
+async function callInventThemeTitle(chunk, priorThemes) {
+  const path = llmPath();
+  if (path.mode === "none") return { called: false };
+  const priorLabelsList = priorLabels(priorThemes);
+  let res;
+  if (path.mode === "proxy") {
+    res = await fetch("/api/llm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chunk, priorLabels: priorLabelsList }),
+    });
+  } else {
+    res = await fetch(OPENAI_CHAT_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${path.key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(buildThemeTitleBody(chunk, priorLabelsList)),
+    });
+  }
+  const { text, json } = await readJsonOrText(res);
+  if (!res.ok) {
+    const detail = json ? JSON.stringify(json) : text;
+    return {
+      called: true,
+      ok: false,
+      error: `OpenAI HTTP ${res.status}`,
+      detail: detail || `HTTP ${res.status}`,
+    };
+  }
+  if (!json) {
+    return { called: true, ok: false, error: "OpenAI response is not JSON", detail: text };
+  }
+  const parsed = parseThemeTitleResponse(json, chunk);
+  if (!parsed.ok) {
+    return { called: true, ok: false, error: parsed.error, detail: JSON.stringify(json, null, 2) };
+  }
+  return { called: true, ok: true, parsed, raw: json };
+}
+
+async function maybeInventTitle(result, chunk, priors) {
+  if (!result || !result.needsTitle) return result;
+  const before = result.inventedLabelBefore || null;
+  const path = llmPath();
+  if (path.mode === "none") {
+    return {
+      ...result,
+      inventedLabelBefore: before,
+      inventedLabelAfter: null,
+      labelSource: "none",
+    };
+  }
+  els.themeMeta.textContent = "Inventing a short theme title (Sol)…";
+  const live = await callInventThemeTitle(chunk.text, priors);
+  if (!live.called || !live.ok) {
+    if (live.called && live.error) {
+      showError(`${live.error}\n${live.detail || ""}`);
+    }
+    return {
+      ...result,
+      inventedLabelBefore: before,
+      inventedLabelAfter: null,
+      labelSource: "openai_error",
+      error: live.error || result.error,
+    };
+  }
+  const next = applyInventedThemeTitle(result, live.parsed.title, result.newScore || 0.62);
+  next.inventedLabelBefore = before;
+  next.model = live.parsed.model || next.model;
+  rememberSessionTheme(live.parsed.title, chunk.text);
+  return next;
+}
+
 async function runThemePropose() {
   const pad = activePad();
   const loc = activeChunkAt(pad.text, pad.caret);
@@ -555,49 +685,54 @@ async function runThemePropose() {
   const seq = (themeSeq += 1);
   const path = livePath();
   try {
+    let result;
     if (path.mode === "none") {
-      const result = proposeThemesHeuristic(chunk.text, priors, loc.earlier);
+      result = proposeThemesHeuristic(chunk.text, priors, loc.earlier);
+    } else {
+      els.themeMeta.textContent = "Scoring the active chunk…";
+      const live = await callLiveTheme(chunk.text, priors);
       if (seq !== themeSeq) return;
-      commitTheme(result, chunk, priors);
-      return;
-    }
-    els.themeMeta.textContent = "Scoring the active chunk…";
-    const live = await callLiveTheme(chunk.text, priors);
-    if (seq !== themeSeq) return;
-    if (!live.called) {
-      const result = proposeThemesHeuristic(chunk.text, priors, loc.earlier);
-      commitTheme(result, chunk, priors);
-      return;
-    }
-    if (!live.ok) {
-      showError(`${live.error}\n${live.detail || ""}`);
-      els.themeMeta.textContent = live.error;
-      renderThemeUi(
-        {
-          method: "live_jev",
-          label: "live TypeSafe Jev (noul)",
+      if (!live.called) {
+        result = proposeThemesHeuristic(chunk.text, priors, loc.earlier);
+      } else if (!live.ok) {
+        showError(`${live.error}\n${live.detail || ""}`);
+        els.themeMeta.textContent = live.error;
+        renderThemeUi(
+          {
+            method: "live_jev",
+            label: "live TypeSafe Jev (noul)",
+            confidence: 0,
+            lowConfidence: true,
+            drift: false,
+            themes: [],
+            needsTitle: false,
+            error: live.error,
+          },
+          chunk,
+          priors
+        );
+        appendThemeLog({
+          chunk: chunk.text,
+          proposals: [],
           confidence: 0,
-          lowConfidence: true,
-          drift: false,
-          themes: [],
-          error: live.error,
-        },
-        chunk,
-        priors
-      );
-      appendThemeLog({
-        chunk: chunk.text,
-        proposals: [],
-        confidence: 0,
-        method: "live_jev",
-        chipChosen: null,
-        newMemoNudge: null,
-        padId: pad.id,
-        activeChunkId: chunk.id,
-      });
-      return;
+          method: "live_jev",
+          chipChosen: null,
+          newMemoNudge: null,
+          padId: pad.id,
+          activeChunkId: chunk.id,
+        });
+        return;
+      } else {
+        result = live.parsed;
+      }
     }
-    commitTheme(live.parsed, chunk, priors);
+    if (seq !== themeSeq) return;
+    result = await maybeInventTitle(result, chunk, priors);
+    if (seq !== themeSeq) return;
+    for (const theme of result.themes || []) {
+      if (theme.label) rememberSessionTheme(theme.label, chunk.text);
+    }
+    commitTheme(result, chunk, priors);
   } catch (err) {
     if (seq !== themeSeq) return;
     const message = err && err.message ? err.message : String(err);
@@ -607,11 +742,11 @@ async function runThemePropose() {
 }
 
 function commitTheme(result, chunk, priors) {
-  showError("");
+  showError(result && result.error ? `${result.error}` : "");
   renderThemeUi(result, chunk, priors);
   appendThemeLog({
     chunk: chunk.text,
-    proposals: buildThemeChips(result),
+    proposals: buildThemeChips({ ...result, chunkText: chunk.text }),
     confidence: result.confidence,
     method: result.method,
     chipChosen: null,
@@ -619,6 +754,10 @@ function commitTheme(result, chunk, priors) {
     padId: activePad().id,
     activeChunkId: chunk.id,
     model: result.model,
+    inventedLabelBefore: result.inventedLabelBefore || null,
+    inventedLabelAfter: result.inventedLabelAfter || null,
+    needsTitle: result.needsTitle,
+    labelSource: result.labelSource || null,
   });
 }
 
@@ -799,9 +938,12 @@ async function loadServerStatus() {
   try {
     const res = await fetch("/api/status", { method: "GET" });
     const data = await res.json();
-    serverStatus = { jevEnv: Boolean(data && data.jevEnv) };
+    serverStatus = {
+      jevEnv: Boolean(data && data.jevEnv),
+      openaiEnv: Boolean(data && data.openaiEnv),
+    };
   } catch (err) {
-    serverStatus = { jevEnv: false };
+    serverStatus = { jevEnv: false, openaiEnv: false };
   }
   renderKeyStatus();
 }
@@ -818,16 +960,22 @@ async function loadCorpus() {
 }
 
 els.saveKeysBtn.onclick = () => {
-  const key = els.jevKey.value.trim();
-  if (key) localStorage.setItem(LS_JEV, key);
+  const jev = els.jevKey.value.trim();
+  const openai = els.openaiKey.value.trim();
+  if (jev) localStorage.setItem(LS_JEV, jev);
   else localStorage.removeItem(LS_JEV);
+  if (openai) localStorage.setItem(LS_OPENAI, openai);
+  else localStorage.removeItem(LS_OPENAI);
   els.jevKey.value = "";
+  els.openaiKey.value = "";
   renderKeyStatus();
 };
 
 els.clearKeysBtn.onclick = () => {
   localStorage.removeItem(LS_JEV);
+  localStorage.removeItem(LS_OPENAI);
   els.jevKey.value = "";
+  els.openaiKey.value = "";
   renderKeyStatus();
 };
 
