@@ -41,7 +41,7 @@ h1{font-size:22px;margin:0 0 6px;letter-spacing:-.03em}
 label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
 textarea,input[type="password"],input[type="search"]{
   width:100%;border-radius:12px;border:1px solid var(--line);background:#0a100e;color:var(--text);
-  padding:12px;font-size:14px;line-height:1.5
+  padding:12px;font:inherit;font-size:14px;line-height:1.5
 }
 textarea{min-height:160px;resize:vertical}
 .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
@@ -89,12 +89,13 @@ button.chip.soft{opacity:.9}
 .empty{color:var(--muted);font-size:13px;margin:0}
 .pad-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 .pad-tabs button.on{border-color:#3d7a5f;color:var(--ok)}
-.editor-shell{position:relative}
+.editor-shell{position:relative;background:#0a100e;border-radius:12px}
 .editor-highlight{
   position:absolute;inset:0;padding:12px;border-radius:12px;border:1px solid transparent;
-  font:inherit;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;overflow:hidden;
-  color:transparent;pointer-events:none;z-index:0
+  font:inherit;font-size:14px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;
+  overflow:auto;scrollbar-width:none;color:transparent;pointer-events:none;z-index:0
 }
+.editor-highlight::-webkit-scrollbar{display:none}
 .editor-highlight mark{
   background:var(--mark);color:transparent;border-radius:4px
 }
