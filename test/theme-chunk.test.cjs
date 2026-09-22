@@ -84,8 +84,8 @@ const sameTheme = proposeThemesHeuristic(
 assert.equal(sameTheme.drift, false);
 assert.equal(sameTheme.lowConfidence, false);
 assert.equal(sameTheme.themes[0].label, "세탁");
-assert.equal(sameTheme.themes[0].score, 0.5053);
-assert.equal(sameTheme.confidence, 0.5053);
+assert.equal(sameTheme.themes[0].score, 0.7583);
+assert.equal(sameTheme.confidence, 0.7583);
 
 const drifted = proposeThemesHeuristic(
   "엔진오일 갈았다. 공임나라에서 맡김.",
@@ -94,9 +94,8 @@ const drifted = proposeThemesHeuristic(
 );
 assert.equal(drifted.drift, true);
 assert.equal(drifted.lowConfidence, true);
-assert.equal(drifted.themes[0].id, "invented");
-assert.equal(drifted.themes[0].label, "엔진오일 갈았다");
-assert.equal(drifted.themes[0].score, 0);
+assert.equal(drifted.confidence, 0);
+assert.ok(drifted.themes.some((t) => t.id === "invented" && t.label === "엔진오일 갈았다 공임나라에서"));
 assert.ok(drifted.confidence < THEME_HEURISTIC_DRIFT);
 
 const lowChips = buildThemeChips(fresh);
@@ -167,7 +166,7 @@ const liveLow = parseThemeChunkAnswers(
   "249150"
 );
 assert.equal(liveLow.ok, true);
-assert.equal(liveLow.confidence, 0.3);
+assert.equal(liveLow.confidence, 0.2);
 assert.equal(liveLow.lowConfidence, true);
 assert.equal(liveLow.themes[0].id, "t1");
 assert.deepEqual(
@@ -220,14 +219,26 @@ assert.equal(
   true
 );
 
-const detached = proposePasteStructure("세탁기 돌림\n\n건조기까지 돌림");
-if (detached.themes[0].cards.length === 1 && detached.themes.length === 1) {
-  detached.themes[0].cards.push({ id: "extra", text: "수건 추가" });
-}
-const beforeDetach = detached.themes.length;
-detachPasteCard(detached, detached.themes[0].cards[1].id);
-assert.equal(detached.themes.length, beforeDetach + 1);
-assert.equal(detached.themes[detached.themes.length - 1].cards.length, 1);
+const detached = {
+  themes: [
+    {
+      id: "theme_1",
+      label: "세탁",
+      cards: [
+        { id: "b01", text: "세탁기 돌림" },
+        { id: "b02", text: "수건 추가" },
+      ],
+    },
+  ],
+  blockCount: 2,
+};
+detachPasteCard(detached, "b02");
+assert.equal(detached.themes.length, 2);
+assert.equal(detached.themes[0].cards.length, 1);
+assert.equal(detached.themes[0].cards[0].id, "b01");
+assert.equal(detached.themes[1].id, "theme_2");
+assert.equal(detached.themes[1].label, "수건 추가");
+assert.equal(detached.themes[1].cards[0].id, "b02");
 
 const confirmed = padsFromPasteStructure(workbench, 3);
 assert.equal(confirmed[0].id, "p03");

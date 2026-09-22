@@ -331,6 +331,10 @@ function inventThemeLabel(chunk) {
   return words.slice(0, 3).join(" ");
 }
 
+function pairOverlap(a, b) {
+  return Math.max(overlapScore(a, b).score, overlapScore(b, a).score);
+}
+
 function proposeThemesHeuristic(chunk, priorThemes, earlierTexts) {
   const c = String(chunk || "");
   const priors = (priorThemes || []).filter((t) => t && t.label);
@@ -339,7 +343,9 @@ function proposeThemesHeuristic(chunk, priorThemes, earlierTexts) {
   let bestPrior = 0;
   for (let i = 0; i < priors.length; i += 1) {
     const prior = priors[i];
-    const score = overlapScore(c, `${prior.label} ${prior.sample || ""}`).score;
+    const labelScore = pairOverlap(c, prior.label);
+    const sampleScore = prior.sample ? pairOverlap(c, prior.sample) : 0;
+    const score = Math.max(labelScore, sampleScore);
     bestPrior = Math.max(bestPrior, score);
     themes.push({
       id: prior.id || `prior_${i}`,
@@ -350,7 +356,7 @@ function proposeThemesHeuristic(chunk, priorThemes, earlierTexts) {
   let maxEarlier = 0;
   for (let i = 0; i < earlier.length; i += 1) {
     const prev = earlier[i];
-    const score = overlapScore(c, prev).score;
+    const score = pairOverlap(c, prev);
     maxEarlier = Math.max(maxEarlier, score);
     const label = inventThemeLabel(prev);
     const existing = themes.find((theme) => theme.label === label);
@@ -648,12 +654,13 @@ function moveActiveChunkToNewPad(session, chunk, newPadId) {
   const pad = pads.find((item) => item.id === activeId);
   if (!pad || !chunk) return session;
   const slice = sliceChunkWithTrailingEmpty(pad.text, chunk);
-  pad.text = `${pad.text.slice(0, slice.start)}${pad.text.slice(slice.end)}`;
+  pad.text = `${pad.text.slice(0, slice.start)}${pad.text.slice(slice.end)}`.replace(/[ \t]*\n+$/g, "");
   pad.caret = Math.min(slice.start, pad.text.length);
+  const moved = slice.moved.replace(/^\n+/, "");
   const newPad = createPad({
     id: newPadId || nextPadId(pads),
-    text: slice.moved,
-    caret: slice.moved.length,
+    text: moved,
+    caret: moved.length,
   });
   pads.push(newPad);
   session.activePadId = newPad.id;
@@ -784,6 +791,7 @@ const exported = {
   countNonEmptyBlocks,
   activeChunkAt,
   inventThemeLabel,
+  pairOverlap,
   proposeThemesHeuristic,
   normalizePriorThemes,
   buildThemeChunkRequest,
