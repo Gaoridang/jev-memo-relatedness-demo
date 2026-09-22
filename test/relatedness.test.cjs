@@ -22,16 +22,30 @@ const corpus = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
 const checked = assertCorpus(corpus);
 assert.equal(checked.ok, true, checked.error);
 assert.equal(corpus.ground_truth, null);
-assert.equal(corpus.count, 36);
-assert.equal(corpus.memos.length, 36);
+assert.equal(corpus.count, 41);
+assert.equal(corpus.memos.length, 41);
 assert.deepEqual(
   corpus.memos.map((m) => m.id),
   EXPECTED_IDS
 );
-assert.equal(EXPECTED_COUNT, 36);
-assert.deepEqual(LONG_MEMO_IDS, ["m31", "m32", "m33", "m34", "m35", "m36"]);
+assert.equal(EXPECTED_COUNT, 41);
+assert.deepEqual(LONG_MEMO_IDS, [
+  "m31",
+  "m32",
+  "m33",
+  "m34",
+  "m35",
+  "m36",
+  "m37",
+  "m38",
+  "m39",
+  "m40",
+  "m41",
+]);
 assert.ok(!("clusters" in corpus));
 assert.ok(!("expected_pairs" in corpus));
+assert.equal(corpus.ground_truth, null);
+assert.ok(corpus.memos.find((m) => m.id === "m37"));
 
 for (const id of LONG_MEMO_IDS) {
   const memo = corpus.memos.find((m) => m.id === id);
@@ -45,7 +59,7 @@ assert.equal(empty.ok, false);
 const food = rankHeuristic("편의점 삼각김밥이랑 바나나우유로 저녁 때움.", corpus.memos);
 assert.equal(food.ok, true);
 assert.equal(food.method, "heuristic");
-assert.ok(food.all.length >= 35);
+assert.ok(food.all.length >= 40);
 assert.equal(
   food.all.some((row) => row.id === "m29"),
   false,
@@ -74,7 +88,7 @@ const laundryHits = laundry.ranked.filter((row) => row.score > 0).map((row) => r
 assert.ok(laundryHits.includes("m08") || laundryHits.includes("m31"));
 
 const poolOnly = excludeSelf(corpus.memos[0].text, corpus.memos);
-assert.equal(poolOnly.length, 35);
+assert.equal(poolOnly.length, 40);
 assert.equal(
   poolOnly.some((m) => m.id === "m01"),
   false

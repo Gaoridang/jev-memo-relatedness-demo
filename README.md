@@ -1,14 +1,14 @@
 # Memo relatedness demo
 
-Paste a **query memo** and rank **related memos** from a fixed pool of **36 Korean memos**. Rate each suggestion Yes/No. The eval log stays in the browser so matching can be improved later.
+Paste a **query memo** and rank **related memos** from a fixed pool of **41 Korean memos**. Rate each suggestion Yes/No. The eval log stays in the browser so matching can be improved later.
 
 This is **relatedness**, not category classification.
 
-The corpus fixture is `fixtures/korean-memo-relatedness-30.json` (filename kept; `count` is 36, ids `m01`–`m36`). `ground_truth` is `null`. There is no answer key and no invented cluster map. `m31`–`m36` are longer multi-topic dumps and stay first-class pool items.
+The corpus fixture is `fixtures/korean-memo-relatedness-30.json` (filename kept; `count` is 41, ids `m01`–`m41`). `ground_truth` is `null`. There is no answer key and no invented cluster map. `m31`–`m41` are longer multi-topic dumps and stay first-class pool items (`m37` is a real messy dump; `m38`–`m41` are synthetic workshop/lab/club/field dumps).
 
 ## How query → related works
 
-1. The UI loads all 36 memos from the fixture. Click a pool card or paste any text.
+1. The UI loads all 41 memos from the fixture. Click a pool card or paste any text.
 2. **Find related** excludes an exact self-match, then ranks the rest.
 3. **With a TypeSafe key** (`JEV_API_KEY` on Vercel and/or localStorage `jev_api_key`): one live TypeSafe Jev call, `POST https://api.typesafe.ai/v1/systemone`. The state is `{ query_memo, pool }`. Each candidate is a **Noul** question: is this memo related to the query? Results are sorted by `noul` (P(related)). Method label: `live_jev`. Failures show the real HTTP/parse error. There are no mocks, stubs, or canned Jev JSON.
 4. **Without a key**: a labeled **keyword / overlap baseline** still returns ranked candidates (Korean tokens + character bigrams). Method label: `heuristic`.

@@ -287,7 +287,7 @@ async function findRelated() {
   els.findBtn.disabled = true;
   els.methodBadge.textContent = "working";
   els.methodBadge.className = "badge";
-  els.resultMeta.textContent = "Scoring the 36-memo pool…";
+  els.resultMeta.textContent = "Scoring the 41-memo pool…";
   try {
     const path = livePath();
     if (path.mode === "none") {

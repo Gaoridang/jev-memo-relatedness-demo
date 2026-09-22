@@ -1,11 +1,23 @@
 const SYSTEMONE_URL = "https://api.typesafe.ai/v1/systemone";
 const JEV_MODEL = "jev-latest";
 const CORPUS_PATH = "/fixtures/korean-memo-relatedness-30.json";
-const EXPECTED_COUNT = 36;
+const EXPECTED_COUNT = 41;
 const EXPECTED_IDS = Object.freeze(
   Array.from({ length: EXPECTED_COUNT }, (_, i) => `m${String(i + 1).padStart(2, "0")}`)
 );
-const LONG_MEMO_IDS = Object.freeze(["m31", "m32", "m33", "m34", "m35", "m36"]);
+const LONG_MEMO_IDS = Object.freeze([
+  "m31",
+  "m32",
+  "m33",
+  "m34",
+  "m35",
+  "m36",
+  "m37",
+  "m38",
+  "m39",
+  "m40",
+  "m41",
+]);
 const DEFAULT_RESULT_LIMIT = 12;
 
 const RELATED_NOUL_INSTRUCTIONS =

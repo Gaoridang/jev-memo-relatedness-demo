@@ -41,7 +41,7 @@ module.exports = async function handler(req, res) {
     res.status(400).json({ error: "candidates are required" });
     return;
   }
-  if (candidates.length > 40) {
+  if (candidates.length > 80) {
     res.status(400).json({ error: "too many candidates" });
     return;
   }

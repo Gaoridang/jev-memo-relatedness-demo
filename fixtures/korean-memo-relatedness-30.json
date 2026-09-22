@@ -1,8 +1,8 @@
 {
-  "title": "Korean memos (n=36) — no ground truth",
+  "title": "Korean memos (n=41) — no ground truth",
   "purpose": "Raw memo pool for relatedness demos. Human evaluates relatedness; no answer key.",
   "language": "ko",
-  "count": 36,
+  "count": 41,
   "ground_truth": null,
   "memos": [
     {
@@ -184,7 +184,32 @@
       "id": "m36",
       "text": "긴 메모 (의도적으로 주제 여러 개). TypeSafe Jev는 챗봇이 아니라 typed eval 레이어라는 정의를 다시 확인하고 싶은데, 바로 이어서 메모 연관성 데모 UI에서 Yes/No 로그가 localStorage에만 있으면 export가 필수라는 생각이 듦. 한편으로 가족 통신비 5천 원 목표랑 블랙리스트 가입 메시지는 완전 다른 축. 세탁 60도 / 땀냄새 / 운동복은 또 다른 축. 한 메모에 다 때려넣음 — 급해서.",
       "source": "multi-topic dump (oryou request)"
+    },
+    {
+      "id": "m37",
+      "text": "금오산 케이블카 할인 여부\n\n숙박 7만\n식사 2.5만\n\nG437 천장텍스 교체 확인\n\n소주 한 박스\n맥주 세 박스\n음료\n\n249150\n\n137호 콘센트\n랜선\n\n이름표 양식 받기\n\n학생회관 102호 김자영 선생님 67만원\n11,174,000원\n커피 8잔\n\n한경국립대 1조로\n충남대 2일차 제외\n\n전남대 테이블 개인적으로 신청자 중 몇 명 왔는지, 단체사진 보낼 것\n\n전체방에 사진 참석감사 다음 참석 보고하고\n안내 예정인데 급하면 사진서명부 신청자\n몇명중에몇명했는지\n\n김현철 경북대\n서울과기대 정송철",
+      "source": "oryou real dump 2026-09-22 (산업안전보건협의회-heavy)"
+    },
+    {
+      "id": "m38",
+      "text": "워크숍 D-2\n\n버스 08:40 집합 정문\n도시락 45인분 매운맛 10 덜매운 35\n\n빔프로젝터 HDMI 어댑터\n화이트보드 마카 검정 4 빨강 2\n\n숙소 키 박스 비번 2580\n수건 추가 요청\n\n저녁 고기 3인분 추가?\n계산 284000 법인카드\n\n명찰 오타: 박지훈→박지현\n\n다음주 발표자\n김수연\n이도윤 대체?\n\n단체카톡 공지 초안\n사진 찍은 사람 구글드라이브 업로드\n지각하면 조별과제 감점",
+      "source": "synthetic messy workshop dump"
+    },
+    {
+      "id": "m39",
+      "text": "연구실 이사\n\n박스 테이프 3\n완충재\n\n서버랙 전원 여유 있는지\n랜 포트 22번 죽음\n\n청소기 빌려야 함\n엘리베이터 예약 수요일 10시\n\n커피머신 물탱크 세척\n우유 Frother 분실?\n\n행정실 열쇠 반납\n주차권 2장\n\n논문 카메라레디 금요일\n리뷰어2 코멘트 표1만\n\nUSB 백업 완료 아님",
+      "source": "synthetic messy lab-move dump"
+    },
+    {
+      "id": "m40",
+      "text": "동아리 개강총회\n\n장소 학생회관 3층\n시간 7시인데 6시반부터 세팅\n\n피자 콤비 4 페퍼로니 2\n콜라 3 사이다 2\n컵 50\n\n회비 미납 명단\n최유진\n한도겸\n\n회계 잔액 418200\n오늘 지출 예상 95000\n\n신입 지원서 QR\n인스타 스토리 올릴 것\n\n발표 ppt 누가?\n작년에 쓰던 거 수정\n\n끝나고 보드게임방?\n인원 보고 결정\n\n방역 물티슈\n손소독제",
+      "source": "synthetic messy club meeting dump"
+    },
+    {
+      "id": "m41",
+      "text": "현장실습 점검\n\nA조 출석 12/15\nB조 출석 14/14\n\n안전화 사이즈 260 3켤레 부족\n헬멧 스티커 재고\n\n강사 식대 인당 12000\n총 몇 명?\n\n사진 촬영 동의서\n미제출자 DM\n\n버스 기사님 커피\n톨게이트 영수증 분실 — 재발급?\n\n내일 우천시 실내 대체\n강의실 204 예약 확인\n\n학부모 문의: 픽업 시간\n답장 초안만",
+      "source": "synthetic messy field-training dump"
     }
   ],
-  "note": "Clusters/expected pairs intentionally omitted. Includes longer multi-topic dumps m31–m36."
+  "note": "No answer key. Includes messy blank-line dumps m37–m41 (m37=oryou real 산업안전보건협의회-style)."
 }
