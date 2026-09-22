@@ -120,6 +120,13 @@ details.fallback summary{cursor:pointer;color:var(--accent-2)}
 .paste-themes{display:grid;gap:10px;margin-top:10px}
 .paste-theme .cards{display:grid;gap:6px;margin-top:8px}
 .sibling-chip{font-size:11px;color:var(--accent-2);margin-left:6px}
+.new-memo-modal{
+  position:fixed;inset:0;z-index:30;display:grid;place-items:center;padding:22px;
+  background:color-mix(in srgb, var(--bg) 46%, transparent);
+}
+.new-memo-modal[hidden]{display:none}
+.new-memo-panel{width:min(560px,100%);margin:0}
+.new-memo-panel h2{font-size:18px;margin:0;letter-spacing:-.03em}
 </style>
 </head>
 <body>
@@ -206,6 +213,20 @@ details.fallback summary{cursor:pointer;color:var(--accent-2)}
     </div>
     <div id="logList" class="log-list" style="margin-top:12px"></div>
   </section>
+</div>
+<div id="newMemoModal" class="new-memo-modal" hidden role="dialog" aria-modal="true" aria-labelledby="newMemoTitle">
+  <div class="panel new-memo-panel">
+    <div class="memo-head">
+      <h2 id="newMemoTitle">새 메모</h2>
+      <button type="button" class="ghost" id="newMemoClose" aria-label="닫기">×</button>
+    </div>
+    <p class="meta">이 문단으로 새 패드를 만듭니다. 원래 메모는 그대로 둡니다.</p>
+    <textarea id="newMemoBody"></textarea>
+    <div class="row">
+      <button type="button" class="primary" id="newMemoConfirm">새 패드로 두기</button>
+      <button type="button" class="ghost" id="newMemoCancel">취소</button>
+    </div>
+  </div>
 </div>
 <script src="/shared.js"></script>
 <script src="/app.js"></script>

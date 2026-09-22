@@ -35,6 +35,11 @@ const els = {
   pasteThemes: document.getElementById("pasteThemes"),
   confirmPasteBtn: document.getElementById("confirmPasteBtn"),
   dismissPasteBtn: document.getElementById("dismissPasteBtn"),
+  newMemoModal: document.getElementById("newMemoModal"),
+  newMemoBody: document.getElementById("newMemoBody"),
+  newMemoConfirm: document.getElementById("newMemoConfirm"),
+  newMemoCancel: document.getElementById("newMemoCancel"),
+  newMemoClose: document.getElementById("newMemoClose"),
 };
 
 let memos = [];
@@ -49,6 +54,7 @@ let themeSeq = 0;
 let currentTheme = null;
 let pendingPasteCount = 0;
 let pasteState = null;
+let newMemoDraft = null;
 
 function loadEvalLog() {
   try {
@@ -506,7 +512,13 @@ function renderChunkRows() {
       if (chip.kind === "기타" || chip.kind === "없음") btn.classList.add("soft");
       if (row.record.stickyLabel && chip.label === row.record.stickyLabel) btn.classList.add("on");
       btn.textContent = chip.label;
-      btn.onclick = () => onChunkChip(row.key, chip);
+      btn.onclick = () => {
+        if (chip.kind === "새메모") {
+          openNewMemo(row);
+          return;
+        }
+        onChunkChip(row.key, chip);
+      };
       chips.appendChild(btn);
     }
     article.appendChild(chips);
@@ -550,7 +562,7 @@ function renderChunkRows() {
       openBtn.type = "button";
       openBtn.className = "primary";
       openBtn.textContent = "새 메모로 열기";
-      openBtn.onclick = () => openNewMemo(row.key);
+      openBtn.onclick = () => openNewMemo(row);
       const stayBtn = document.createElement("button");
       stayBtn.type = "button";
       stayBtn.className = "ghost";
@@ -582,10 +594,6 @@ function chunkRecord(key) {
 }
 
 function onChunkChip(key, chip) {
-  if (chip.kind === "새메모") {
-    openNewMemo(key);
-    return;
-  }
   const pad = activePad();
   const record = chunkRecord(key);
   if (!record) return;
@@ -651,22 +659,57 @@ function markShouldNotSplit(key, value) {
   renderChunkRows();
 }
 
-function openNewMemo(key) {
-  syncPadFromEditor();
-  const pad = activePad();
-  const rows = projectChunkBoard(pad, pad.text);
-  const row = rows.find((item) => item.key === key);
-  if (!row) return;
-  pad.caret = row.block.start;
-  upsertChunkLog(pad, row.record, currentTheme, {
-    chipChosen: "새 메모로 열기",
-    newMemoNudge: "yes",
+function openNewMemo(row) {
+  if (newMemoDraft) return;
+  if (!row || !row.block || !row.key) return;
+  const draft = beginNewMemoDraft(session, {
+    chunkKey: row.key,
     blockId: row.block.id,
+    text: row.block.text,
   });
-  moveActiveChunkToNewPad(session, row.block);
-  loadPadIntoEditor();
+  if (!draft) return;
+  newMemoDraft = draft;
+  els.newMemoBody.value = draft.body;
+  els.newMemoModal.hidden = false;
+  const end = draft.body.length;
+  els.newMemoBody.setSelectionRange(end, end);
+  document.querySelector(".wrap").inert = true;
+  els.newMemoBody.focus();
+  els.newMemoBody.setSelectionRange(end, end);
+}
+
+function confirmNewMemo() {
+  if (!newMemoDraft) return;
+  newMemoDraft.body = els.newMemoBody.value;
+  const draft = newMemoDraft;
+  const result = commitNewMemoDraft(session, draft);
+  newMemoDraft = null;
+  els.newMemoModal.hidden = true;
+  document.querySelector(".wrap").inert = false;
+  if (!result.ok) {
+    els.query.focus();
+    return;
+  }
+  session = result.session;
+  const pad = session.pads.find((item) => item.id === draft.sourcePadId);
+  const record = pad && pad.chunkMap && pad.chunkMap[draft.sourceChunkKey];
+  if (pad && record) {
+    upsertChunkLog(pad, record, currentTheme, {
+      chipChosen: "새 메모로 열기",
+      newMemoNudge: "yes",
+      blockId: draft.sourceBlockId,
+    });
+  }
+  renderPads();
   els.query.focus();
-  scheduleTheme();
+}
+
+function dismissNewMemo() {
+  if (!newMemoDraft) return;
+  newMemoDraft = null;
+  els.newMemoModal.hidden = true;
+  document.querySelector(".wrap").inert = false;
+  els.query.focus();
 }
 
 async function readJsonOrText(res) {
@@ -1210,6 +1253,18 @@ els.addPadBtn.onclick = () => {
 };
 els.confirmPasteBtn.onclick = confirmPaste;
 els.dismissPasteBtn.onclick = dismissPaste;
+els.newMemoConfirm.onclick = confirmNewMemo;
+els.newMemoCancel.onclick = dismissNewMemo;
+els.newMemoClose.onclick = dismissNewMemo;
+els.newMemoModal.addEventListener("click", (event) => {
+  if (event.target === els.newMemoModal) dismissNewMemo();
+});
+els.newMemoBody.addEventListener("input", () => {
+  if (newMemoDraft) newMemoDraft.body = els.newMemoBody.value;
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") dismissNewMemo();
+});
 els.showAllBtn.onclick = () => {
   showAll = !showAll;
   renderResults();

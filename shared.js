@@ -1037,33 +1037,53 @@ function createPadSession(overrides) {
   return { pads: [pad], activePadId: pad.id };
 }
 
-function sliceChunkWithTrailingEmpty(text, chunk) {
-  const raw = String(text || "");
-  const start = chunk && typeof chunk.start === "number" ? chunk.start : 0;
-  let end = chunk && typeof chunk.end === "number" ? chunk.end : raw.length;
-  const rest = raw.slice(end);
-  const blank = rest.match(/^(?:[ \t]*\n)+|[ \t]+$/);
-  if (blank) end += blank[0].length;
-  return { start, end, moved: raw.slice(start, end) };
+function beginNewMemoDraft(session, source) {
+  if (!session || !source || !session.pads) return null;
+  if (
+    typeof source.chunkKey !== "string" ||
+    typeof source.blockId !== "string" ||
+    typeof source.text !== "string"
+  ) {
+    return null;
+  }
+  const pad = session.pads.find((item) => item.id === session.activePadId);
+  if (!pad || !pad.chunkMap) return null;
+  const record = pad.chunkMap[source.chunkKey];
+  if (!record) return null;
+  if (source.text !== record.text) return null;
+  if (!normalizeText(record.text)) return null;
+  return {
+    kind: "new-memo-draft",
+    sourcePadId: session.activePadId,
+    sourceChunkKey: source.chunkKey,
+    sourceBlockId: source.blockId,
+    seedText: record.text,
+    body: record.text,
+  };
 }
 
-function moveActiveChunkToNewPad(session, chunk, newPadId) {
-  const pads = (session && session.pads) || [];
-  const activeId = session && session.activePadId;
-  const pad = pads.find((item) => item.id === activeId);
-  if (!pad || !chunk) return session;
-  const slice = sliceChunkWithTrailingEmpty(pad.text, chunk);
-  pad.text = `${pad.text.slice(0, slice.start)}${pad.text.slice(slice.end)}`.replace(/[ \t]*\n+$/g, "");
-  pad.caret = Math.min(slice.start, pad.text.length);
-  const moved = slice.moved.replace(/^\n+/, "");
-  const newPad = createPad({
-    id: newPadId || nextPadId(pads),
-    text: moved,
-    caret: moved.length,
+function commitNewMemoDraft(session, draft) {
+  if (
+    !session ||
+    !session.pads ||
+    !draft ||
+    draft.kind !== "new-memo-draft" ||
+    typeof draft.body !== "string" ||
+    draft.consumed === true
+  ) {
+    return { ok: false, session };
+  }
+  const pad = createPad({
+    id: nextPadId(session.pads),
+    text: draft.body,
+    caret: draft.body.length,
   });
-  pads.push(newPad);
-  session.activePadId = newPad.id;
-  return session;
+  const next = {
+    pads: session.pads.concat(pad),
+    activePadId: session.activePadId,
+  };
+  draft.consumed = true;
+  return { ok: true, session: next, padId: pad.id };
 }
 
 function mergePasteCards(structure, fromId, intoId) {
@@ -1220,8 +1240,8 @@ const exported = {
   visibleChunkTags,
   projectChunkBoard,
   applyChunkJudgment,
-  sliceChunkWithTrailingEmpty,
-  moveActiveChunkToNewPad,
+  beginNewMemoDraft,
+  commitNewMemoDraft,
   mergePasteCards,
   movePasteCard,
   detachPasteCard,

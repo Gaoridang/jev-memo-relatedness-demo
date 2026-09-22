@@ -32,7 +32,8 @@ const {
   setThemeChunkChoice,
   themeDriftFingerprint,
   createPadSession,
-  moveActiveChunkToNewPad,
+  beginNewMemoDraft,
+  commitNewMemoDraft,
   mergePasteCards,
   movePasteCard,
   detachPasteCard,
@@ -242,13 +243,62 @@ const missingNew = parseThemeChunkAnswers(
 assert.equal(missingNew.ok, false);
 
 const session = createPadSession({ pad: { id: "p01", text: "AAA 첫 메모\n\nBBB 새 주제", caret: 16 } });
-const splitAt = activeChunkAt(session.pads[0].text, 16);
-assert.equal(splitAt.active.text, "BBB 새 주제");
-moveActiveChunkToNewPad(session, splitAt.active, "p02");
-assert.equal(session.activePadId, "p02");
-assert.equal(session.pads[0].text, "AAA 첫 메모");
-assert.equal(session.pads[1].id, "p02");
-assert.equal(session.pads[1].text, "BBB 새 주제");
+const sourcePad = session.pads[0];
+const board = projectChunkBoard(sourcePad, sourcePad.text);
+const bbb = board.find((row) => row.block.text === "BBB 새 주제");
+assert.equal(bbb.block.text, "BBB 새 주제");
+bbb.record.stickyLabel = "세탁";
+const draft = beginNewMemoDraft(session, {
+  chunkKey: bbb.key,
+  blockId: bbb.block.id,
+  text: bbb.block.text,
+});
+assert.equal(draft.kind, "new-memo-draft");
+assert.equal(draft.sourcePadId, "p01");
+assert.equal(draft.sourceChunkKey, bbb.key);
+assert.equal(draft.sourceBlockId, bbb.block.id);
+assert.equal(draft.seedText, "BBB 새 주제");
+assert.equal(draft.body, "BBB 새 주제");
+assert.equal(session.pads.length, 1);
+assert.equal(session.activePadId, "p01");
+assert.equal(sourcePad.text, "AAA 첫 메모\n\nBBB 새 주제");
+assert.equal(session.pads[0], sourcePad);
+assert.equal(bbb.record.stickyLabel, "세탁");
+draft.body = "BBB 고친 문단";
+const committed = commitNewMemoDraft(session, draft);
+assert.equal(committed.ok, true);
+assert.equal(committed.padId, "p02");
+assert.notEqual(committed.session, session);
+assert.equal(committed.session.pads[0], sourcePad);
+assert.equal(committed.session.pads[0].text, "AAA 첫 메모\n\nBBB 새 주제");
+assert.equal(committed.session.activePadId, "p01");
+assert.equal(committed.session.pads[1].text, "BBB 고친 문단");
+assert.deepEqual(committed.session.pads[1].chunkMap, {});
+assert.equal(committed.session.pads[1].assignedThemeLabel, null);
+assert.equal(bbb.record.stickyLabel, "세탁");
+assert.equal(session.pads.length, 1);
+const second = commitNewMemoDraft(committed.session, draft);
+assert.equal(second.ok, false);
+assert.equal(second.session, committed.session);
+assert.equal(committed.session.pads.length, 2);
+const stale = beginNewMemoDraft(session, {
+  chunkKey: bbb.key,
+  blockId: bbb.block.id,
+  text: "BBB 다른 문장",
+});
+assert.equal(stale, null);
+assert.equal(session.pads.length, 1);
+const emptyDraft = beginNewMemoDraft(session, {
+  chunkKey: bbb.key,
+  blockId: bbb.block.id,
+  text: "BBB 새 주제",
+});
+emptyDraft.body = "";
+const emptyPad = commitNewMemoDraft(session, emptyDraft);
+assert.equal(emptyPad.ok, true);
+assert.equal(emptyPad.session.pads[1].text, "");
+assert.equal(emptyPad.session.pads[0], sourcePad);
+assert.equal(session.pads.length, 1);
 
 const fpA = themeDriftFingerprint("엔진오일 갈았다.", ["세탁"]);
 const fpB = themeDriftFingerprint("엔진오일 갈았다.", ["세탁"]);

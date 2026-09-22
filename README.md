@@ -12,7 +12,7 @@ The corpus fixture is `fixtures/korean-memo-relatedness-30.json` (filename kept;
 2. Yes accepts a tag and keeps it on the row. No rejects it and keeps the chip on the row. An optional note is stored with the rating.
 3. A picked or rated chip stays on that row after the next propose.
 4. **새 메모로 열기** appears on a chunk only when its vocab topic conflicts with earlier chunks in the same memo, or a live Jev `new_topic` score says so and the chunk is not the same vocab. A same-topic continuation does not nudge. The old low-overlap nudge is logged as `falsePositive` so a rater can mark `shouldNotSplit`.
-5. **새 메모로 열기** moves that chunk onto a new pad. The new pad's chip, selection, and highlight start empty. `sessionThemePriors` stay.
+5. **새 메모로 열기** opens a dialog. The dialog text starts as that chunk. Dismiss leaves the original pad untouched. Confirm appends a new pad. The chunk stays in the original pad, and the editor stays on that pad. `sessionThemePriors` stay.
 6. **같은 주제예요** sets `shouldNotSplit` and hides the nudge.
 
 With a TypeSafe key (`JEV_API_KEY` on Vercel and/or localStorage `jev_api_key`) the page sends `{ mode: "theme_chunk", chunk, priorThemes }` to `/api/jev` (or TypeSafe from the browser). The request is Noul per prior theme plus `new_topic` and `none_topic`. The model is the account default `jev-latest`. Failures show the real HTTP or parse error. There are no mocks.
