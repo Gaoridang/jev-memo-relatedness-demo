@@ -1,0 +1,190 @@
+{
+  "title": "Korean memos (n=36) — no ground truth",
+  "purpose": "Raw memo pool for relatedness demos. Human evaluates relatedness; no answer key.",
+  "language": "ko",
+  "count": 36,
+  "ground_truth": null,
+  "memos": [
+    {
+      "id": "m01",
+      "text": "아침과 저녁은 마파두부, 점심은 아내가 만든 떡볶이. 애들이 불닭소스에 뭐든 찍어 먹는다.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m02",
+      "text": "미루던 엔진오일 갈았다. 공임나라에서 맡김.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m03",
+      "text": "예금 해지 이자가 한꺼번에 금융소득으로 잡혀서 지방세까지 붙었다. 배보다 배꼽이 크다.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m04",
+      "text": "스팸 김밥은 현미라 찰기가 없고 옆구리가 터진다. 그래도 맛있다.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m05",
+      "text": "목욕탕 들렀다가 동네에서 제일 맛있는 돼지국밥 먹었다.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m06",
+      "text": "인턴 메일에 '어떤가요?'라고 썼다가 '어떨까요?'로 고치라는 지적. 쿠션어 강요.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m07",
+      "text": "알바에서 받아 온 빵으로 아침. 점심·저녁은 한돈 목살 구이.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m08",
+      "text": "운동 많이 해서 땀냄새가 난다. 세탁 60도로 돌리니 냄새가 안 남는다.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m09",
+      "text": "월 990원짜리 알뜰요금제로 넘긴다. 가족 통신비 5천 원 목표.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m10",
+      "text": "가입 중 '블랙리스트 대상자입니다' 메시지. 잔고 부족으로 출금 실패한 적 있대.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m11",
+      "text": "경희대 앞 뚜레쥬르. 안 쓰는 제빵기는 당근에 팔았다.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m12",
+      "text": "산길에서 뭔가 종아리를 물었다. 유리 조각 찌른 듯한 통증. 물린디 샀다.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m13",
+      "text": "월말 가족 인바디 경진대회. 나랑 아내만 점수 올랐다. 인센티브 만원.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m14",
+      "text": "등록금 고지서 마감일이었는데 아무도 몰랐다.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m15",
+      "text": "페퍼민트 수확해서 말렸다. 저녁에 스쿼트.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m16",
+      "text": "중국산 브랜디에 앵두청 조금 넣고 하이볼 만들었다.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m17",
+      "text": "교회에서 특이한 호박을 얻어왔다. 호박김치부침개랑 호박죽 해봐야지.",
+      "source": "brunch @givemyself/319 paraphrase"
+    },
+    {
+      "id": "m18",
+      "text": "아무 일도 없었지만, 그래서 오히려 좋았다.",
+      "source": "a.caforra.com diary pattern example"
+    },
+    {
+      "id": "m19",
+      "text": "오늘은 괜히 마음이 복잡했다.",
+      "source": "a.caforra.com diary pattern example"
+    },
+    {
+      "id": "m20",
+      "text": "오랜만에 친구와 통화하며 웃을 수 있었다.",
+      "source": "a.caforra.com diary pattern example"
+    },
+    {
+      "id": "m21",
+      "text": "회의가 길어졌지만 중요한 피드백을 얻었다.",
+      "source": "a.caforra.com diary pattern example"
+    },
+    {
+      "id": "m22",
+      "text": "따뜻한 커피 한 잔이 나를 살렸다.",
+      "source": "a.caforra.com diary pattern example"
+    },
+    {
+      "id": "m23",
+      "text": "아침 산책 중 만난 현지인 할머니가 미소 지으며 손 흔들어줬다.",
+      "source": "routineflow.tistory.com travel note example"
+    },
+    {
+      "id": "m24",
+      "text": "이 골목은 빵 냄새가 가득해서 그냥 걷기만 해도 행복했다.",
+      "source": "routineflow.tistory.com travel note example"
+    },
+    {
+      "id": "m25",
+      "text": "노을빛이 퍼질 때 가슴이 벅차올랐다.",
+      "source": "routineflow.tistory.com travel note example"
+    },
+    {
+      "id": "m26",
+      "text": "저당 골든애플 블랙티로 오후 한 잔. 메가커피 신메뉴 느낌.",
+      "source": "loose paraphrase from public promo vibe"
+    },
+    {
+      "id": "m27",
+      "text": "오늘 세탁기 돌리고 건조기까지. 흐린 날이라 빨래가 안 마른다.",
+      "source": "everyday scrap"
+    },
+    {
+      "id": "m28",
+      "text": "지하철에서 이어폰 한쪽이 또 빠졌다. 새거 사야 하나.",
+      "source": "everyday scrap"
+    },
+    {
+      "id": "m29",
+      "text": "편의점 삼각김밥이랑 바나나우유로 저녁 때움.",
+      "source": "everyday scrap"
+    },
+    {
+      "id": "m30",
+      "text": "알람을 세 개 맞춰도 결국 스누즈만 누른다.",
+      "source": "everyday scrap"
+    },
+    {
+      "id": "m31",
+      "text": "오늘 할 일 한꺼번에: 1) 내일 오전 11시 콜 전에 Day1 pick 후보 3개만 짧게 정리 2) 현대카드 리포트 루틴이 09:15로 바뀐 거 맞는지 확인 3) PT 이체 영수증은 카드 내역이랑 섞지 말고 따로 폴더 4) 세탁기 돌리고 건조기 — 비 와서 베란다 빨래는 포기. 아 그리고 이어폰 한쪽 또 빠졌는데 편의점 가면서 볼까 말까.",
+      "source": "multi-topic dump (oryou request)"
+    },
+    {
+      "id": "m32",
+      "text": "급하게 적어두는 메모 — Bookclub 쪽은 Gate가 AWAIT_USER인 상태고 햅틱은 실기기에서만 확인 가능하다고 했는데, 갑자기 Writing Helper가 아티클 소스 dig 요청해서 X Digger한테 넘겨야 함. 점심은 삼각김밥으로 때우고, 오후엔 금오 강의 진도 남은 회차만 확인. 저녁에 인바디? 아니다 그건 주말. 하이볼 재료는 집에 있음.",
+      "source": "multi-topic dump (oryou request)"
+    },
+    {
+      "id": "m33",
+      "text": "머리 복잡함. Core ML 세그멘테이션은 소매 경계가 깨지는 이슈가 있고 Mac 시뮬보다 실기기 Neural Engine 지연이 체감인데, 동시에 Vercel 배포 URL이 README에 안 적혀 있어서 Day0 데모 링크를 못 찾겠음. 친구한테 통화는 했는데 내용은 별거 없고… 세금/지방세 얘기는 아빠 일기에서 본 거라 내 일과는 무관할 수도. 알람은 또 스누즈만 누름.",
+      "source": "multi-topic dump (oryou request)"
+    },
+    {
+      "id": "m34",
+      "text": "장보기+잡무: 바나나우유, 물린디(종아리 물린 거 아직 쓰림), 페퍼민트는 이미 말려둠. 당근에 제빵기 판 돈은 통신비(알뜰요금제)로 돌릴지 등록금 쪽 보탤지 고민. 교회 호박으로 부침개 vs 죽 — 둘 다 하기엔 시간 없고, 스쿼트는 저녁에. 아 돼지국밥 맛집 이름 까먹음.",
+      "source": "multi-topic dump (oryou request)"
+    },
+    {
+      "id": "m35",
+      "text": "업무/개인 섞임 메모 — 메일에 쿠션어('어떨까요?') 쓰라는 피드백 반영해야 하고, 회의는 길었지만 피드백은 쓸만했음. 그 사이에 노을 보러 산책? ㄴㄴ 시간 없음. 따뜻한 커피만. 관련 없는 듯한 한 줄: 골목 빵 냄새 때문에 걷고 싶어짐. 나중에 relatedness 테스트용으로 남겨둠.",
+      "source": "multi-topic dump (oryou request)"
+    },
+    {
+      "id": "m36",
+      "text": "긴 메모 (의도적으로 주제 여러 개). TypeSafe Jev는 챗봇이 아니라 typed eval 레이어라는 정의를 다시 확인하고 싶은데, 바로 이어서 메모 연관성 데모 UI에서 Yes/No 로그가 localStorage에만 있으면 export가 필수라는 생각이 듦. 한편으로 가족 통신비 5천 원 목표랑 블랙리스트 가입 메시지는 완전 다른 축. 세탁 60도 / 땀냄새 / 운동복은 또 다른 축. 한 메모에 다 때려넣음 — 급해서.",
+      "source": "multi-topic dump (oryou request)"
+    }
+  ],
+  "note": "Clusters/expected pairs intentionally omitted. Includes longer multi-topic dumps m31–m36."
+}

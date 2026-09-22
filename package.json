@@ -1,0 +1,8 @@
+{
+  "name": "jev-memo-relatedness-demo",
+  "private": true,
+  "scripts": {
+    "test": "node test/relatedness.test.cjs",
+    "start": "python3 -m http.server 8765"
+  }
+}

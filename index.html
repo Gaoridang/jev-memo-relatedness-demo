@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memo relatedness — 36 Korean memos, no answer key</title>
+<style>
+:root{
+  --bg:#0c1110;
+  --panel:#141a18;
+  --line:#2a3330;
+  --text:#eef4f1;
+  --muted:#93a29b;
+  --accent:#7ee0b0;
+  --accent-2:#d7c27a;
+  --ok:#5ef0c5;
+  --warn:#ffb86b;
+  --bad:#ff7b8a;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:ui-sans-serif,system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",Segoe UI,Roboto,sans-serif;
+  background:
+    radial-gradient(900px 420px at 8% -10%,#1c2a24,transparent 55%),
+    radial-gradient(700px 380px at 100% 0%,#1a2218,var(--bg) 50%);
+  color:var(--text);
+  min-height:100vh;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:22px;display:grid;gap:14px}
+h1{font-size:22px;margin:0 0 6px;letter-spacing:-.03em}
+.sub,.meta,.compare-note{color:var(--muted);font-size:13px;line-height:1.5;margin:0}
+.panel{background:color-mix(in srgb,var(--panel) 94%,transparent);border:1px solid var(--line);border-radius:16px;padding:16px}
+.grid{display:grid;grid-template-columns:1.05fr .95fr;gap:14px}
+.stack{display:grid;gap:14px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+textarea,input[type="password"],input[type="search"]{
+  width:100%;border-radius:12px;border:1px solid var(--line);background:#0a100e;color:var(--text);
+  padding:12px;font-size:14px;line-height:1.5
+}
+textarea{min-height:140px;resize:vertical}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+button{
+  appearance:none;border:1px solid var(--line);background:#1a221f;color:var(--text);
+  border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer
+}
+button:hover{border-color:#4d655b}
+button.primary{background:#1f3b30;border-color:#3d7a5f;color:#d9ffe9}
+button.ghost{background:transparent}
+button:disabled{opacity:.55;cursor:wait}
+.section{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px}
+.badge{display:inline-block;font-size:10px;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted)}
+.badge.ok{color:var(--ok);border-color:#2c5c4e}
+.badge.warn{color:var(--warn);border-color:#6a4e2a}
+.badge.bad{color:var(--bad);border-color:#6a2f38}
+.pill{display:inline-block;font-size:10px;border-radius:999px;padding:2px 7px;border:1px solid var(--line);color:var(--muted)}
+.pill.long{color:var(--accent-2);border-color:#6b5d32}
+.error{
+  white-space:pre-wrap;word-break:break-word;background:#2a1418;border:1px solid #6a2f38;
+  color:#ffd0d5;border-radius:12px;padding:10px 12px;font-size:12px
+}
+.pool,.results,.log-list{display:grid;gap:8px}
+.pool{max-height:520px;overflow:auto;padding-right:4px}
+.log-list{max-height:320px;overflow:auto}
+.memo-card,.result,.log-item{
+  text-align:left;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#101614;color:var(--text)
+}
+.memo-card{cursor:pointer;width:100%}
+.memo-card:hover{border-color:#4d655b}
+.memo-card p,.result p,.log-item p{margin:6px 0 0;font-size:13px;line-height:1.45}
+.memo-head,.result-top,.log-head,.rate{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.rank{color:var(--accent);font-size:12px;margin-left:6px}
+.score{font-size:12px;color:var(--text)}
+.muted{color:var(--muted)}
+.rate{margin-top:10px;font-size:12px;color:var(--muted)}
+.rate button.on.yes{border-color:#2c5c4e;color:var(--ok)}
+.rate button.on.no{border-color:#6a2f38;color:var(--bad)}
+.empty{color:var(--muted);font-size:13px;margin:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Memo relatedness</h1>
+    <p class="sub">Paste a query memo. Rank related notes from a fixed pool of <strong>36 Korean memos</strong>. Rate each suggestion Yes/No. The eval log stays in this browser so matching can improve later.</p>
+    <p class="compare-note">This is outbound relatedness, not category classify. The fixture has <code>ground_truth: null</code> — no answer key and no invented clusters. m31–m36 are first-class long / multi-topic dumps.</p>
+  </header>
+
+  <section class="panel">
+    <div class="section">Keys</div>
+    <label for="jevKey">TypeSafe Jev key. Saved as localStorage <code>jev_api_key</code>. Never committed. Used only for live TypeSafe <code>POST /v1/systemone</code>.</label>
+    <input id="jevKey" type="password" autocomplete="off" placeholder="paste key here, or leave empty for the keyword baseline" />
+    <div class="row">
+      <button type="button" id="saveKeysBtn">Save local key</button>
+      <button type="button" class="ghost" id="clearKeysBtn">Clear local key</button>
+      <span class="meta" id="keyStatus"></span>
+    </div>
+    <p class="meta" id="pathStatus" style="margin-top:8px"></p>
+  </section>
+
+  <div class="grid">
+    <div class="stack">
+      <section class="panel">
+        <div class="section">Query memo</div>
+        <label for="query">Paste or type a memo. Click a pool card to copy it here.</label>
+        <textarea id="query" placeholder="예: 편의점 삼각김밥이랑 바나나우유로 저녁 때움."></textarea>
+        <div class="row">
+          <button type="button" class="primary" id="findBtn">Find related</button>
+          <button type="button" class="ghost" id="clearQueryBtn">Clear</button>
+          <span class="badge" id="methodBadge">idle</span>
+        </div>
+        <p class="meta" id="resultMeta" style="margin-top:10px">No search yet.</p>
+        <div id="errorBox" class="error" hidden></div>
+      </section>
+
+      <section class="panel">
+        <div class="section">Ranked related memos</div>
+        <div id="results" class="results"></div>
+        <div class="row">
+          <button type="button" class="ghost" id="showAllBtn" hidden>Show all</button>
+        </div>
+        <label for="note" style="margin-top:12px">Optional note for this run</label>
+        <textarea id="note" style="min-height:72px" placeholder="What felt right or wrong about the ranking?"></textarea>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="section">Pool · 36 memos · no answer key</div>
+      <label for="poolSearch">Search the pool</label>
+      <input id="poolSearch" type="search" placeholder="id or text · e.g. m31, 세탁, 삼각김밥" />
+      <p class="meta" id="poolCount" style="margin:8px 0">0 / 0</p>
+      <div id="pool" class="pool"></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="section">Eval log · localStorage <code>memoRelatednessEvalLog</code></div>
+    <p class="meta">Each Find related appends: timestamp, query, method (<code>heuristic</code> or <code>live_jev</code>), ranked id/rank/score, per-item Yes/No, optional note. Survives refresh on this browser.</p>
+    <div class="row">
+      <button type="button" id="exportJsonBtn">Download JSON</button>
+      <button type="button" id="exportJsonlBtn">Download JSONL</button>
+      <button type="button" class="ghost" id="clearLogBtn">Clear log</button>
+    </div>
+    <div id="logList" class="log-list" style="margin-top:12px"></div>
+  </section>
+</div>
+<script src="/shared.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
