@@ -12,6 +12,13 @@ const {
   countNonEmptyBlocks,
   activeChunkAt,
   proposeThemesHeuristic,
+  classifyChunkSplit,
+  projectChunkBoard,
+  applyChunkJudgment,
+  visibleChunkTags,
+  rateChunkTag,
+  setChunkShouldNotSplit,
+  createPad,
   matchFixedThemeVocab,
   buildThemeTitleBody,
   parseThemeTitleResponse,
@@ -366,5 +373,89 @@ const badTitle = parseThemeTitleResponse(
   "일단 집에가서 빨래를 해야함"
 );
 assert.equal(badTitle.ok, false);
+
+const laundry = "오늘 세탁기 돌리고 건조기까지.";
+const towels = "수건이랑 걸레도 같이 넣었다";
+const towelContinue = proposeThemesHeuristic(towels, [{ id: "t1", label: "세탁", sample: laundry }], [laundry]);
+assert.equal(towelContinue.drift, false);
+assert.equal(towelContinue.legacyWouldNudge, true);
+assert.equal(towelContinue.falsePositive, true);
+assert.equal(towelContinue.splitKind, "candidate");
+assert.equal(buildThemeChips(towelContinue).some((chip) => chip.kind === "새메모"), false);
+assert.ok(towelContinue.themes.some((theme) => theme.label === "집안일"));
+
+const firstOfNewMemo = proposeThemesHeuristic(
+  "엔진오일 갈았다. 공임나라에서 맡김.",
+  [{ id: "t1", label: "세탁", sample: laundry }],
+  []
+);
+assert.equal(firstOfNewMemo.drift, false);
+assert.equal(firstOfNewMemo.splitKind, "candidate");
+assert.equal(buildThemeChips(firstOfNewMemo).some((chip) => chip.kind === "새메모"), false);
+
+const liveSameTopic = classifyChunkSplit({
+  chunkText: towels,
+  earlierTexts: [laundry],
+  priorThemes: [{ id: "t1", label: "세탁" }],
+  bestPriorMatch: 0,
+  live: { newScore: 0.8, bestPriorTheme: 0.1 },
+});
+assert.equal(liveSameTopic.drift, false);
+assert.equal(liveSameTopic.kind, "candidate");
+assert.equal(liveSameTopic.legacyWouldNudge, true);
+
+const liveOil = classifyChunkSplit({
+  chunkText: "엔진오일 갈았다. 공임나라에서 맡김.",
+  earlierTexts: [laundry],
+  priorThemes: [{ id: "t1", label: "세탁" }],
+  bestPriorMatch: 0,
+  live: { newScore: 0.81, bestPriorTheme: 0.12 },
+});
+assert.equal(liveOil.drift, true);
+assert.equal(liveOil.kind, "nudge");
+
+const oldPad = createPad({
+  id: "p01",
+  text: `${laundry}\n\n${towels}`,
+});
+const oldRows = projectChunkBoard(oldPad, oldPad.text);
+assert.equal(oldRows.length, 2);
+applyChunkJudgment(oldRows[1].record, towelContinue);
+oldRows[1].record.stickyLabel = "집안일";
+oldRows[1].record.ratings["집안일"] = { verdict: "yes", note: "같은 빨래" };
+const freshPad = createPad({ id: "p02", text: "엔진오일 갈았다." });
+const freshRows = projectChunkBoard(freshPad, freshPad.text);
+assert.equal(freshRows[0].record.stickyLabel, null);
+assert.deepEqual(freshRows[0].record.ratings, {});
+assert.equal(freshRows[0].record.proposals.length, 0);
+assert.equal(oldRows[1].record.stickyLabel, "집안일");
+const kept = projectChunkBoard(oldPad, `${laundry}\n\n${towels}`);
+assert.equal(kept[1].key, oldRows[1].key);
+assert.equal(visibleChunkTags(kept[1].record).some((tag) => tag.label === "집안일"), true);
+
+const rated = makeThemeChunkEvalEntry({
+  chunk: towels,
+  proposals: buildThemeChips(towelContinue),
+  confidence: towelContinue.confidence,
+  method: "heuristic",
+  padId: "p01",
+  activeChunkId: "b02",
+  chunkKey: "c02",
+  splitKind: "candidate",
+  legacyWouldNudge: true,
+  falsePositive: true,
+});
+assert.equal(rated.falsePositive, true);
+assert.equal(rated.shouldNotSplit, null);
+rateChunkTag(rated, "집안일", "yes", "계속");
+assert.equal(rated.ratings["집안일"].verdict, "yes");
+assert.equal(rated.ratings["집안일"].note, "계속");
+assert.equal(rated.chipChosen, "집안일");
+assert.equal(typeof rated.ts, "string");
+setChunkShouldNotSplit(rated, true);
+assert.equal(rated.shouldNotSplit, true);
+const exportedRated = JSON.parse(toEvalJson([rated]));
+assert.equal(exportedRated[0].shouldNotSplit, true);
+assert.equal(toEvalJsonl([rated]).trim().split("\n").length, 1);
 
 console.log("theme-chunk.test.cjs passed");

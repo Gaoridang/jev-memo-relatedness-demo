@@ -411,6 +411,64 @@ function pairOverlap(a, b) {
   return Math.max(overlapScore(a, b).score, overlapScore(b, a).score);
 }
 
+function vocabLabelsInText(text) {
+  const raw = String(text || "").toLowerCase();
+  const labels = [];
+  if (!normalizeText(raw)) return labels;
+  for (const entry of THEME_VOCAB) {
+    const hit = entry.keywords.some((kw) => raw.includes(String(kw).toLowerCase()));
+    if (hit) labels.push(entry.label);
+  }
+  return labels;
+}
+
+function classifyChunkSplit({ chunkText, earlierTexts, priorThemes, bestPriorMatch, live }) {
+  const earlier = (earlierTexts || []).filter((text) => normalizeText(text));
+  const priors = (priorThemes || []).filter((theme) => theme && theme.label);
+  const lexical = typeof bestPriorMatch === "number" ? bestPriorMatch : 0;
+  const legacyHeuristic =
+    (earlier.length > 0 || priors.length > 0) && lexical < THEME_HEURISTIC_DRIFT;
+  const legacyLive = Boolean(
+    live &&
+      priors.length > 0 &&
+      typeof live.newScore === "number" &&
+      live.newScore >= 0.5 &&
+      typeof live.bestPriorTheme === "number" &&
+      live.bestPriorTheme < 0.55
+  );
+  const legacyWouldNudge = live ? legacyLive : legacyHeuristic;
+  const chunkLabels = vocabLabelsInText(chunkText);
+  const earlierLabels = [];
+  for (const prev of earlier) {
+    for (const label of vocabLabelsInText(prev)) {
+      if (!earlierLabels.includes(label)) earlierLabels.push(label);
+    }
+  }
+  let maxEarlier = 0;
+  for (const prev of earlier) maxEarlier = Math.max(maxEarlier, pairOverlap(chunkText, prev));
+  const sameVocab = chunkLabels.some((label) => earlierLabels.includes(label));
+  const conflictingVocab = chunkLabels.length > 0 && earlierLabels.length > 0 && !sameVocab;
+  const continuation =
+    earlier.length > 0 && !conflictingVocab && (sameVocab || maxEarlier >= THEME_HEURISTIC_DRIFT);
+  const liveShift = Boolean(
+    live &&
+      earlier.length > 0 &&
+      !continuation &&
+      typeof live.newScore === "number" &&
+      live.newScore >= 0.5 &&
+      (typeof live.bestPriorTheme !== "number" || live.bestPriorTheme < 0.55)
+  );
+  const drift = earlier.length > 0 && !continuation && (conflictingVocab || liveShift);
+  const falsePositive = Boolean(legacyWouldNudge) && !drift;
+  const kind = drift ? "nudge" : falsePositive ? "candidate" : "none";
+  return {
+    drift,
+    legacyWouldNudge: Boolean(legacyWouldNudge),
+    falsePositive,
+    kind,
+  };
+}
+
 function proposeThemesHeuristic(chunk, priorThemes, earlierTexts) {
   const c = String(chunk || "");
   const priors = (priorThemes || []).filter((t) => t && t.label);
@@ -466,20 +524,29 @@ function proposeThemesHeuristic(chunk, priorThemes, earlierTexts) {
     return String(a.id).localeCompare(String(b.id));
   });
   const confidence = themes.length ? themes[0].score : 0;
-  const earlierExists = earlier.length > 0 || priors.length > 0;
   const bestPriorMatch = Math.max(bestPrior, maxEarlier);
   const lowConfidence = confidence < THEME_HEURISTIC_LOW || !normalizeText(c);
-  const drift = earlierExists && bestPriorMatch < THEME_HEURISTIC_DRIFT;
   const needsTitle = Boolean(normalizeText(c)) && (themes.length === 0 || confidence < THEME_HEURISTIC_LOW);
+  const split = classifyChunkSplit({
+    chunkText: c,
+    earlierTexts: earlier,
+    priorThemes: priors,
+    bestPriorMatch,
+    live: null,
+  });
   return {
     ok: true,
     method: "heuristic",
     label: "keyword / overlap baseline",
     confidence: Number(confidence.toFixed(4)),
     lowConfidence,
-    drift,
+    drift: split.drift,
     needsTitle,
     themes,
+    bestPriorMatch: Number(bestPriorMatch.toFixed(4)),
+    legacyWouldNudge: split.legacyWouldNudge,
+    falsePositive: split.falsePositive,
+    splitKind: split.kind,
   };
 }
 
@@ -596,6 +663,7 @@ function parseThemeChunkAnswers(payload, priorThemes, chunk) {
     drift,
     needsTitle,
     themes,
+    bestPriorTheme: Number(bestPriorTheme.toFixed(4)),
     noneScore: Number(noneAns.noul.toFixed(4)),
     newScore: Number(newAns.noul.toFixed(4)),
   };
@@ -763,11 +831,18 @@ function makeThemeChunkEvalEntry({
   newMemoNudge,
   padId,
   activeChunkId,
+  chunkKey,
   model,
   inventedLabelBefore,
   inventedLabelAfter,
   needsTitle,
   labelSource,
+  ratings,
+  stickyLabel,
+  splitKind,
+  legacyWouldNudge,
+  falsePositive,
+  shouldNotSplit,
 }) {
   return {
     kind: "theme_chunk",
@@ -786,12 +861,41 @@ function makeThemeChunkEvalEntry({
     newMemoNudge: newMemoNudge === "yes" || newMemoNudge === "no" ? newMemoNudge : null,
     padId: padId || null,
     activeChunkId: activeChunkId || null,
+    chunkKey: chunkKey || null,
     inventedLabelBefore:
       inventedLabelBefore == null ? null : String(inventedLabelBefore),
     inventedLabelAfter: inventedLabelAfter == null ? null : String(inventedLabelAfter),
     needsTitle: Boolean(needsTitle),
     labelSource: labelSource || null,
+    ratings: ratings && typeof ratings === "object" ? ratings : {},
+    stickyLabel: stickyLabel || null,
+    splitKind: splitKind || "none",
+    legacyWouldNudge: Boolean(legacyWouldNudge),
+    falsePositive: Boolean(falsePositive),
+    shouldNotSplit: shouldNotSplit === true ? true : null,
   };
+}
+
+function rateChunkTag(entry, label, verdict, note) {
+  if (!entry || entry.kind !== "theme_chunk") return entry;
+  const clean = normalizeText(label);
+  if (!clean) return entry;
+  if (!entry.ratings || typeof entry.ratings !== "object") entry.ratings = {};
+  const prev = entry.ratings[clean] || { verdict: null, note: "" };
+  const nextVerdict =
+    verdict === "yes" || verdict === "no" || verdict === null ? verdict : prev.verdict;
+  const nextNote = note === undefined ? prev.note || "" : String(note);
+  entry.ratings[clean] = { verdict: nextVerdict, note: nextNote };
+  if (nextVerdict === "yes") entry.chipChosen = clean;
+  entry.ratedAt = new Date().toISOString();
+  return entry;
+}
+
+function setChunkShouldNotSplit(entry, value) {
+  if (!entry || entry.kind !== "theme_chunk") return entry;
+  entry.shouldNotSplit = value === true ? true : null;
+  entry.ratedAt = new Date().toISOString();
+  return entry;
 }
 
 function setThemeChunkChoice(entry, chipChosen, newMemoNudge) {
@@ -825,7 +929,107 @@ function createPad(overrides) {
     text,
     caret: typeof src.caret === "number" ? src.caret : text.length,
     assignedThemeLabel: src.assignedThemeLabel || null,
+    chunkMap: {},
+    chunkSeq: 0,
   };
+}
+
+function emptyChunkRecord(key) {
+  return {
+    key,
+    text: "",
+    judgedText: "",
+    proposals: [],
+    ratings: {},
+    stickyLabel: null,
+    split: {
+      kind: "none",
+      legacyWouldNudge: false,
+      falsePositive: false,
+      shouldNotSplit: null,
+    },
+  };
+}
+
+function visibleChunkTags(record) {
+  const tags = [];
+  const seen = new Set();
+  for (const chip of (record && record.proposals) || []) {
+    if (!chip || !chip.label || chip.kind === "새메모" || seen.has(chip.label)) continue;
+    seen.add(chip.label);
+    tags.push(chip);
+  }
+  const pinned = [];
+  if (record && record.stickyLabel) pinned.push(record.stickyLabel);
+  for (const [label, rating] of Object.entries((record && record.ratings) || {})) {
+    if (rating && (rating.verdict || rating.note)) pinned.push(label);
+  }
+  for (const label of pinned) {
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    tags.push({ id: `pin_${label}`, label, kind: "theme", score: null });
+  }
+  return tags;
+}
+
+function projectChunkBoard(pad, text) {
+  const source = typeof text === "string" ? text : (pad && pad.text) || "";
+  const blocks = splitBlocks(source).filter((block) => normalizeText(block.text));
+  if (!pad.chunkMap || typeof pad.chunkMap !== "object") pad.chunkMap = {};
+  if (typeof pad.chunkSeq !== "number") pad.chunkSeq = 0;
+  const used = new Set();
+  const rows = [];
+  for (const block of blocks) {
+    const norm = normalizeText(block.text);
+    let key = null;
+    let best = 0;
+    for (const [candidate, rec] of Object.entries(pad.chunkMap)) {
+      if (used.has(candidate) || !rec) continue;
+      if (normalizeText(rec.text) === norm || normalizeText(rec.judgedText) === norm) {
+        key = candidate;
+        break;
+      }
+      const score = pairOverlap(rec.text || rec.judgedText || "", block.text);
+      if (score >= 0.55 && score > best) {
+        best = score;
+        key = candidate;
+      }
+    }
+    if (!key) {
+      pad.chunkSeq += 1;
+      key = `c${String(pad.chunkSeq).padStart(2, "0")}`;
+      pad.chunkMap[key] = emptyChunkRecord(key);
+    }
+    used.add(key);
+    pad.chunkMap[key].text = block.text;
+    rows.push({ key, block, record: pad.chunkMap[key] });
+  }
+  for (const key of Object.keys(pad.chunkMap)) {
+    if (!used.has(key)) delete pad.chunkMap[key];
+  }
+  return rows;
+}
+
+function applyChunkJudgment(record, result) {
+  if (!record) return record;
+  const judgedText = result && typeof result.judgedText === "string" ? result.judgedText : record.text;
+  const same = Boolean(record.judgedText) && normalizeText(record.judgedText) === normalizeText(judgedText);
+  const previousFlag = record.split && record.split.shouldNotSplit === true;
+  const chips = buildThemeChips({ ...(result || {}), drift: false, chunkText: judgedText });
+  record.proposals = chips;
+  const kind = result && result.splitKind
+    ? result.splitKind
+    : result && result.drift
+      ? "nudge"
+      : "none";
+  record.split = {
+    kind,
+    legacyWouldNudge: Boolean(result && result.legacyWouldNudge),
+    falsePositive: Boolean(result && result.falsePositive),
+    shouldNotSplit: same ? (previousFlag ? true : null) : null,
+  };
+  if (normalizeText(record.text) === normalizeText(judgedText)) record.judgedText = record.text;
+  return record;
 }
 
 function createPadSession(overrides) {
@@ -993,6 +1197,7 @@ const exported = {
   safeThemeLabel,
   pairOverlap,
   proposeThemesHeuristic,
+  classifyChunkSplit,
   normalizePriorThemes,
   buildThemeChunkRequest,
   parseThemeChunkAnswers,
@@ -1005,10 +1210,16 @@ const exported = {
   makeEvalEntry,
   makeThemeChunkEvalEntry,
   setThemeChunkChoice,
+  rateChunkTag,
+  setChunkShouldNotSplit,
   themeDriftFingerprint,
   nextPadId,
   createPad,
   createPadSession,
+  emptyChunkRecord,
+  visibleChunkTags,
+  projectChunkBoard,
+  applyChunkJudgment,
   sliceChunkWithTrailingEmpty,
   moveActiveChunkToNewPad,
   mergePasteCards,
