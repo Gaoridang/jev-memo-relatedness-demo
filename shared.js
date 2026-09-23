@@ -127,23 +127,32 @@ function rankHeuristic(query, memos, limit) {
     };
   }
   const pool = excludeSelf(q, memos);
+  const queryPhrases = scanPhrases(q);
   const ranked = pool
     .map((memo) => {
       const overlap = overlapScore(q, memo.text);
-      const why =
+      const memoKeys = new Set(scanPhrases(memo.text).map((phrase) => phrase.key));
+      const phraseHits = [];
+      for (const phrase of queryPhrases) {
+        if (memoKeys.has(phrase.key)) phraseHits.push(phrase.surface);
+      }
+      let why =
         overlap.hits.length > 0
           ? `keyword overlap: ${overlap.hits.join(", ")}`
           : "no keyword overlap — still returned as a baseline candidate";
+      if (phraseHits.length) why += ` · names: ${phraseHits.join(", ")}`;
       return {
         id: memo.id,
         text: memo.text,
         score: Number(overlap.score.toFixed(4)),
         why,
+        phraseHits,
         long: isLongMemo(memo.id),
       };
     })
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
+      if (b.phraseHits.length !== a.phraseHits.length) return b.phraseHits.length - a.phraseHits.length;
       return a.id.localeCompare(b.id);
     })
     .map((row, index) => ({ ...row, rank: index + 1 }));
@@ -780,6 +789,7 @@ function makeEvalEntry({ query, method, ranked, model, note }) {
     rank: typeof row.rank === "number" ? row.rank : index + 1,
     score: typeof row.score === "number" ? row.score : null,
     why: row.why || null,
+    phraseHits: Array.isArray(row.phraseHits) ? row.phraseHits.slice() : [],
   }));
   const ratings = {};
   for (const row of rows) ratings[row.id] = null;

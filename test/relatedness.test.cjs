@@ -166,4 +166,31 @@ assert.equal(json[0].method, "heuristic");
 const jsonl = toEvalJsonl([entry, entry]);
 assert.equal(jsonl.trim().split("\n").length, 2);
 
+const tied = rankHeuristic("Core ML", [
+  { id: "m01", text: "core ml notes" },
+  { id: "m02", text: "Core ML notes" },
+]);
+assert.equal(tied.ranked.length, 2);
+assert.equal(tied.ranked[0].score, tied.ranked[1].score);
+assert.equal(tied.ranked[0].id, "m02");
+assert.equal(tied.ranked[1].id, "m01");
+assert.deepEqual(tied.ranked[0].phraseHits, ["Core ML"]);
+assert.deepEqual(tied.ranked[1].phraseHits, []);
+assert.equal(tied.ranked[0].why.includes("names: Core ML"), true);
+
+const tiedExport = makeEvalEntry({
+  query: "Core ML",
+  method: "heuristic",
+  ranked: tied.ranked,
+});
+assert.deepEqual(tiedExport.ranked[0].phraseHits, ["Core ML"]);
+assert.deepEqual(tiedExport.ranked[1].phraseHits, []);
+const liveExport = makeEvalEntry({
+  query: "q",
+  method: "live_jev",
+  ranked: liveShape.ranked,
+});
+assert.deepEqual(liveExport.ranked[0].phraseHits, []);
+assert.deepEqual(liveExport.ranked[1].phraseHits, []);
+
 console.log("relatedness.test.cjs passed");
