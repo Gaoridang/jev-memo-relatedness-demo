@@ -41,6 +41,8 @@ const {
   padsFromPasteStructure,
   toEvalJson,
   toEvalJsonl,
+  extractPhrases,
+  emptyChunkRecord,
 } = require("../shared");
 
 const fixturePath = path.join(__dirname, "..", "fixtures", "korean-memo-relatedness-30.json");
@@ -557,5 +559,88 @@ openThemeChunkEntry(partialLog, {
 assert.equal(partialLog.length, 2);
 assert.equal(partialLog[0].chunkKey, "c02");
 assert.equal(partialLog[1].chunkKey, "c01");
+
+const phraseSurfaces = {
+  m02: ["공임나라"],
+  m11: ["경희대"],
+  m32: ["Bookclub", "AWAIT_USER", "Writing Helper", "X Digger"],
+  m33: ["Core ML", "Mac", "Neural Engine", "Vercel", "URL", "README"],
+  m36: ["TypeSafe Jev"],
+  m37: ["금오산", "학생회관", "김자영", "한경국립대", "충남대", "전남대", "김현철", "경북대", "서울과기대", "정송철"],
+  m38: ["HDMI", "박지훈", "박지현", "김수연", "이도윤"],
+  m39: ["Frother", "USB"],
+  m40: ["학생회관", "최유진", "한도겸"],
+};
+for (const memo of corpus.memos) {
+  assert.deepEqual(
+    extractPhrases(memo.text).map((phrase) => phrase.surface),
+    phraseSurfaces[memo.id] || [],
+    memo.id
+  );
+}
+
+const m33 = corpus.memos.find((memo) => memo.id === "m33");
+const m33Phrases = extractPhrases(m33.text);
+const coreMl = m33Phrases.find((phrase) => phrase.surface === "Core ML");
+assert.deepEqual(
+  { surface: coreMl.surface, key: coreMl.key, kind: coreMl.kind },
+  { surface: "Core ML", key: "core ml", kind: "latin" }
+);
+assert.equal(coreMl.end - coreMl.start, 7);
+assert.equal(m33Phrases.some((phrase) => phrase.surface === "Day0"), false);
+assert.equal(m33Phrases.some((phrase) => phrase.surface === "ML"), false);
+
+const m37Surfaces = extractPhrases(corpus.memos.find((memo) => memo.id === "m37").text).map(
+  (phrase) => phrase.surface
+);
+assert.equal(m37Surfaces.includes("G437"), false);
+assert.equal(m37Surfaces.includes("신청자"), false);
+assert.equal(m37Surfaces.includes("이슈가"), false);
+assert.equal(m37Surfaces.includes("이름표"), false);
+
+assert.deepEqual(emptyChunkRecord("c01").phrases, []);
+
+const storedRatings = { "parent:work": { verdict: "yes", note: "", label: "업무" } };
+const entry = makeThemeChunkEvalEntry({
+  chunk: m33.text,
+  proposals: [],
+  ratings: storedRatings,
+  padId: "p01",
+  chunkKey: "c01",
+});
+const exportedPhrases = JSON.parse(toEvalJson([entry]))[0];
+assert.deepEqual(
+  exportedPhrases.phrases.map((phrase) => phrase.surface),
+  phraseSurfaces.m33
+);
+assert.equal(exportedPhrases.ratings["parent:work"].verdict, "yes");
+assert.equal(Object.prototype.hasOwnProperty.call(entry.ratings, "phrases"), false);
+assert.equal(Object.prototype.hasOwnProperty.call(entry.proposals, "phrases"), false);
+assert.equal(entry.proposals.some((row) => row && Object.prototype.hasOwnProperty.call(row, "phrases")), false);
+
+const phraseLog = [];
+openThemeChunkEntry(phraseLog, {
+  chunk: m33.text,
+  proposals: [],
+  ratings: storedRatings,
+  padId: "p01",
+  chunkKey: "c01",
+});
+assert.deepEqual(
+  phraseLog[0].phrases.map((phrase) => phrase.surface),
+  phraseSurfaces.m33
+);
+openThemeChunkEntry(phraseLog, {
+  chunk: "빨래만",
+  proposals: [],
+  ratings: storedRatings,
+  padId: "p01",
+  chunkKey: "c01",
+  phrases: [{ surface: "stale", key: "stale", kind: "latin", start: 0, end: 5 }],
+});
+assert.equal(phraseLog.length, 1);
+assert.deepEqual(phraseLog[0].phrases, []);
+assert.deepEqual(Object.keys(phraseLog[0].ratings), ["parent:work"]);
+assert.equal(phraseLog[0].ratings["parent:work"].verdict, "yes");
 
 console.log("theme-chunk.test.cjs passed");

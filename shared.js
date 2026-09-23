@@ -257,6 +257,14 @@ function readCatalogVocab() {
   throw new Error("theme catalog missing");
 }
 
+function readExtractPhrases() {
+  if (typeof extractPhrases === "function") return extractPhrases;
+  if (typeof module !== "undefined" && module.exports) return require("./phrases").extractPhrases;
+  throw new Error("phrase scanner missing");
+}
+
+const scanPhrases = readExtractPhrases();
+
 const THEME_VOCAB = Object.freeze(readCatalogVocab());
 
 const THEME_MATCH_INSTRUCTIONS =
@@ -809,10 +817,11 @@ function makeThemeChunkEvalEntry({
   falsePositive,
   shouldNotSplit,
 }) {
+  const chunkText = String(chunk || "");
   return {
     kind: "theme_chunk",
     ts: new Date().toISOString(),
-    chunk: String(chunk || ""),
+    chunk: chunkText,
     proposals: (proposals || []).map((p) => ({
       id: p.id,
       label: p.label,
@@ -838,6 +847,7 @@ function makeThemeChunkEvalEntry({
     legacyWouldNudge: Boolean(legacyWouldNudge),
     falsePositive: Boolean(falsePositive),
     shouldNotSplit: shouldNotSplit === true ? true : null,
+    phrases: scanPhrases(chunkText),
   };
 }
 
@@ -908,10 +918,12 @@ function openThemeChunkEntry(entries, fields, touch) {
   }
   if (!entry) {
     entry = makeThemeChunkEvalEntry(fields || {});
+    entry.phrases = scanPhrases(entry.chunk);
     list.push(entry);
     return entry;
   }
   entry.chunk = String((fields && fields.chunk) || "");
+  entry.phrases = scanPhrases(entry.chunk);
   entry.proposals = (fields && fields.proposals) || [];
   entry.activeChunkId = fields.activeChunkId || entry.activeChunkId;
   entry.ratings = fields.ratings && typeof fields.ratings === "object" ? fields.ratings : {};
@@ -974,6 +986,11 @@ function createPad(overrides) {
   };
 }
 
+function stampPhrases(record) {
+  record.phrases = scanPhrases(record.text);
+  return record;
+}
+
 function emptyChunkRecord(key) {
   return {
     key,
@@ -981,6 +998,7 @@ function emptyChunkRecord(key) {
     judgedText: "",
     proposals: [],
     ratings: {},
+    phrases: [],
     stickyLabel: null,
     theme: typeof initialTheme === "function" ? initialTheme() : null,
     split: {
@@ -1045,6 +1063,7 @@ function projectChunkBoard(pad, text) {
     }
     used.add(key);
     pad.chunkMap[key].text = block.text;
+    stampPhrases(pad.chunkMap[key]);
     rows.push({ key, block, record: pad.chunkMap[key] });
   }
   for (const key of Object.keys(pad.chunkMap)) {
@@ -1154,6 +1173,7 @@ function commitNewMemoDraft(session, draft) {
   if (normalizeText(draft.body)) {
     const record = emptyChunkRecord("c01");
     record.text = draft.body;
+    stampPhrases(record);
     record.stickyLabel = draft.stickyLabel || null;
     if (draft.theme) record.theme = draft.theme;
     record.ratings = canonicalRatings(draft.ratings);
@@ -1297,6 +1317,7 @@ const exported = {
   tokenize,
   overlapScore,
   excludeSelf,
+  extractPhrases: scanPhrases,
   rankHeuristic,
   buildRelatednessRequest,
   parseRelatednessAnswers,
@@ -1328,6 +1349,7 @@ const exported = {
   createPad,
   createPadSession,
   emptyChunkRecord,
+  stampPhrases,
   visibleChunkTags,
   projectChunkBoard,
   applyChunkJudgment,

@@ -243,6 +243,11 @@ function formatScore(score) {
   return score.toFixed(3);
 }
 
+function formatPhraseNames(phrases) {
+  if (!Array.isArray(phrases) || !phrases.length) return "";
+  return ` · names ${phrases.map((phrase) => phrase.surface).join(", ")}`;
+}
+
 function formatTagRatings(ratings) {
   const parts = [];
   for (const [key, rating] of Object.entries(ratings || {})) {
@@ -273,7 +278,7 @@ function renderLog() {
           <span>${escapeHtml(entry.ts)}</span>
         </div>
         <p>${escapeHtml(entry.chunk || "")}</p>
-          <div class="muted">confidence ${entry.confidence == null ? "—" : entry.confidence} · chip ${escapeHtml(String(entry.chipChosen))} · split ${escapeHtml(String(entry.splitKind || entry.newMemoNudge))} · shouldNotSplit ${escapeHtml(String(entry.shouldNotSplit))} · pad ${escapeHtml(String(entry.padId))} · ${escapeHtml(String(entry.chunkKey || entry.activeChunkId))}${escapeHtml(formatTagRatings(entry.ratings))}</div>
+          <div class="muted">confidence ${entry.confidence == null ? "—" : entry.confidence} · chip ${escapeHtml(String(entry.chipChosen))} · split ${escapeHtml(String(entry.splitKind || entry.newMemoNudge))} · shouldNotSplit ${escapeHtml(String(entry.shouldNotSplit))} · pad ${escapeHtml(String(entry.padId))} · ${escapeHtml(String(entry.chunkKey || entry.activeChunkId))}${escapeHtml(formatTagRatings(entry.ratings))}${escapeHtml(formatPhraseNames(entry.phrases))}</div>
       `;
     } else {
       const yes = Object.values(entry.ratings || {}).filter((v) => v === "yes").length;
@@ -412,6 +417,7 @@ function upsertChunkLog(pad, record, extra) {
   const meta = extra || {};
   const split = record.split || {};
   const has = (key) => Object.prototype.hasOwnProperty.call(meta, key);
+  stampPhrases(record);
   const fields = {
     chunk: record.text,
     proposals: projected.proposals,
