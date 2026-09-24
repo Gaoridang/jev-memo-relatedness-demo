@@ -1,11 +1,23 @@
 const SYSTEMONE_URL = "https://api.typesafe.ai/v1/systemone";
 const JEV_MODEL = "jev-latest";
 const CORPUS_PATH = "/fixtures/korean-memo-relatedness-30.json";
-const EXPECTED_COUNT = 36;
+const EXPECTED_COUNT = 41;
 const EXPECTED_IDS = Object.freeze(
   Array.from({ length: EXPECTED_COUNT }, (_, i) => `m${String(i + 1).padStart(2, "0")}`)
 );
-const LONG_MEMO_IDS = Object.freeze(["m31", "m32", "m33", "m34", "m35", "m36"]);
+const LONG_MEMO_IDS = Object.freeze([
+  "m31",
+  "m32",
+  "m33",
+  "m34",
+  "m35",
+  "m36",
+  "m37",
+  "m38",
+  "m39",
+  "m40",
+  "m41",
+]);
 const DEFAULT_RESULT_LIMIT = 12;
 
 const RELATED_NOUL_INSTRUCTIONS =
@@ -115,23 +127,32 @@ function rankHeuristic(query, memos, limit) {
     };
   }
   const pool = excludeSelf(q, memos);
+  const queryPhrases = scanPhrases(q);
   const ranked = pool
     .map((memo) => {
       const overlap = overlapScore(q, memo.text);
-      const why =
+      const memoKeys = new Set(scanPhrases(memo.text).map((phrase) => phrase.key));
+      const phraseHits = [];
+      for (const phrase of queryPhrases) {
+        if (memoKeys.has(phrase.key)) phraseHits.push(phrase.surface);
+      }
+      let why =
         overlap.hits.length > 0
           ? `keyword overlap: ${overlap.hits.join(", ")}`
           : "no keyword overlap — still returned as a baseline candidate";
+      if (phraseHits.length) why += ` · names: ${phraseHits.join(", ")}`;
       return {
         id: memo.id,
         text: memo.text,
         score: Number(overlap.score.toFixed(4)),
         why,
+        phraseHits,
         long: isLongMemo(memo.id),
       };
     })
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
+      if (b.phraseHits.length !== a.phraseHits.length) return b.phraseHits.length - a.phraseHits.length;
       return a.id.localeCompare(b.id);
     })
     .map((row, index) => ({ ...row, rank: index + 1 }));
@@ -233,16 +254,29 @@ function parseRelatednessAnswers(payload, candidates) {
   };
 }
 
+
+function readExtractPhrases() {
+  if (typeof globalThis !== "undefined" && typeof globalThis.extractPhrases === "function") {
+    return globalThis.extractPhrases;
+  }
+  if (typeof module !== "undefined" && module.exports) return require("./phrases").extractPhrases;
+  throw new Error("phrase scanner missing");
+}
+
+const scanPhrases = readExtractPhrases();
+
 function makeEvalEntry({ query, method, ranked, model, note }) {
   const rows = (ranked || []).map((row, index) => ({
     id: row.id,
     rank: typeof row.rank === "number" ? row.rank : index + 1,
     score: typeof row.score === "number" ? row.score : null,
     why: row.why || null,
+    phraseHits: Array.isArray(row.phraseHits) ? row.phraseHits.slice() : [],
   }));
   const ratings = {};
   for (const row of rows) ratings[row.id] = null;
   return {
+    kind: "related_run",
     ts: new Date().toISOString(),
     query: normalizeText(query),
     method,
@@ -258,6 +292,16 @@ function setEvalRating(entry, id, rating) {
   if (rating !== "yes" && rating !== "no" && rating !== null) return entry;
   entry.ratings[id] = rating;
   return entry;
+}
+
+
+function keepRelatedRuns(entries) {
+  const rows = Array.isArray(entries) ? entries : [];
+  return rows.filter((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+    if (row.kind === "theme_chunk") return false;
+    return row.kind == null || row.kind === "related_run";
+  });
 }
 
 function toEvalJson(entries) {
@@ -278,19 +322,15 @@ const exported = {
   EXPECTED_IDS,
   LONG_MEMO_IDS,
   DEFAULT_RESULT_LIMIT,
-  RELATED_NOUL_INSTRUCTIONS,
-  RELATED_NOUL_CRITERIA,
   isLongMemo,
-  normalizeText,
   assertCorpus,
-  tokenize,
-  overlapScore,
   excludeSelf,
   rankHeuristic,
   buildRelatednessRequest,
   parseRelatednessAnswers,
   makeEvalEntry,
   setEvalRating,
+  keepRelatedRuns,
   toEvalJson,
   toEvalJsonl,
 };

@@ -3,152 +3,234 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Memo relatedness — 36 Korean memos, no answer key</title>
+<title>메모</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
 :root{
-  --bg:#0c1110;
-  --panel:#141a18;
-  --line:#2a3330;
-  --text:#eef4f1;
-  --muted:#93a29b;
-  --accent:#7ee0b0;
-  --accent-2:#d7c27a;
-  --ok:#5ef0c5;
-  --warn:#ffb86b;
-  --bad:#ff7b8a;
+  --background:#fafafa;
+  --foreground:#18181b;
+  --card:#ffffff;
+  --muted:#f4f4f5;
+  --muted-foreground:#71717a;
+  --border:#e4e4e7;
+  --primary:#18181b;
+  --primary-foreground:#fafafa;
+  --secondary:#f4f4f5;
+  --ring:#18181b;
+  --ok:#047857;
+  --warn:#b45309;
+  --bad:#be123c;
+  --radius:10px;
+  --shadow:0 1px 2px rgb(24 24 27 / 6%);
 }
 *{box-sizing:border-box}
 body{
   margin:0;
-  font-family:"Noto Sans KR",ui-sans-serif,system-ui,-apple-system,"Apple SD Gothic Neo",Segoe UI,Roboto,sans-serif;
-  background:
-    radial-gradient(900px 420px at 8% -10%,#1c2a24,transparent 55%),
-    radial-gradient(700px 380px at 100% 0%,#1a2218,var(--bg) 50%);
-  color:var(--text);
+  color:var(--foreground);
+  background:var(--background);
+  font-family:"Noto Sans KR",ui-sans-serif,system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif;
+  font-size:15px;
+  line-height:1.55;
+}
+button,input,textarea{font:inherit;color:inherit}
+#appShell{
   min-height:100vh;
+  display:grid;
+  grid-template-columns:300px minmax(0,1fr);
 }
-.wrap{max-width:1180px;margin:0 auto;padding:22px;display:grid;gap:14px}
-h1{font-size:22px;margin:0 0 6px;letter-spacing:-.03em}
-.sub,.meta,.compare-note{color:var(--muted);font-size:13px;line-height:1.5;margin:0}
-.panel{background:color-mix(in srgb,var(--panel) 94%,transparent);border:1px solid var(--line);border-radius:16px;padding:16px}
-.grid{display:grid;grid-template-columns:1.05fr .95fr;gap:14px}
-.stack{display:grid;gap:14px}
-@media(max-width:900px){.grid{grid-template-columns:1fr}}
-label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
-textarea,input[type="password"],input[type="search"]{
-  width:100%;border-radius:12px;border:1px solid var(--line);background:#0a100e;color:var(--text);
-  padding:12px;font-size:14px;line-height:1.5
+.side{
+  border-right:1px solid var(--border);
+  background:#f4f4f5;
+  padding:20px 14px 28px;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
 }
-textarea{min-height:140px;resize:vertical}
-.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+.brand{font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-foreground);margin:0}
+.main{padding:28px 36px 64px}
+.main-inner{max-width:760px}
+h1{font-size:28px;line-height:1.2;letter-spacing:-.03em;margin:0 0 6px;font-weight:700}
+.lede{margin:0 0 18px;color:var(--muted-foreground);font-size:14px}
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  padding:14px;
+}
+.section{font-size:12px;font-weight:600;letter-spacing:.01em;margin:0 0 8px}
+label{display:block;margin:8px 0 6px;font-size:12px;color:var(--muted-foreground)}
+textarea,input[type="password"],input[type="search"],input[type="text"]{
+  width:100%;
+  border:1px solid var(--border);
+  background:#fff;
+  border-radius:8px;
+  padding:8px 10px;
+  font-size:14px;
+  line-height:1.5;
+}
+textarea:focus,input:focus{outline:2px solid transparent;box-shadow:0 0 0 2px #fff,0 0 0 4px var(--ring)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
 button{
-  appearance:none;border:1px solid var(--line);background:#1a221f;color:var(--text);
-  border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer
+  appearance:none;
+  border:1px solid var(--border);
+  background:var(--card);
+  border-radius:8px;
+  padding:7px 12px;
+  font-size:13px;
+  font-weight:500;
+  cursor:pointer;
+  box-shadow:var(--shadow);
 }
-button:hover{border-color:#4d655b}
-button.primary{background:#1f3b30;border-color:#3d7a5f;color:#d9ffe9}
-button.ghost{background:transparent}
+button:hover{background:var(--secondary)}
+button.primary{background:var(--primary);border-color:var(--primary);color:var(--primary-foreground)}
+button.primary:hover{background:#27272a}
+button.ghost{background:transparent;box-shadow:none}
 button:disabled{opacity:.55;cursor:wait}
-.section{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px}
-.badge{display:inline-block;font-size:10px;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted)}
-.badge.ok{color:var(--ok);border-color:#2c5c4e}
-.badge.warn{color:var(--warn);border-color:#6a4e2a}
-.badge.bad{color:var(--bad);border-color:#6a2f38}
-.pill{display:inline-block;font-size:10px;border-radius:999px;padding:2px 7px;border:1px solid var(--line);color:var(--muted)}
-.pill.long{color:var(--accent-2);border-color:#6b5d32}
+.badge{
+  display:inline-flex;
+  align-items:center;
+  border:1px solid var(--border);
+  border-radius:999px;
+  padding:1px 8px;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.03em;
+  text-transform:uppercase;
+  color:var(--muted-foreground);
+  background:#fff;
+}
+.badge.ok{color:var(--ok);border-color:#a7f3d0;background:#ecfdf5}
+.badge.warn{color:var(--warn);border-color:#fde68a;background:#fffbeb}
+.badge.bad{color:var(--bad);border-color:#fecdd3;background:#fff1f2}
+.meta,.sub{color:var(--muted-foreground);font-size:12px;line-height:1.5;margin:0}
+.muted{color:var(--muted-foreground)}
 .error{
-  white-space:pre-wrap;word-break:break-word;background:#2a1418;border:1px solid #6a2f38;
-  color:#ffd0d5;border-radius:12px;padding:10px 12px;font-size:12px
+  white-space:pre-wrap;
+  word-break:break-word;
+  background:#fff1f2;
+  border:1px solid #fecdd3;
+  color:#9f1239;
+  border-radius:8px;
+  padding:10px 12px;
+  font-size:13px;
+  margin-top:12px;
 }
 .pool,.results,.log-list{display:grid;gap:8px}
-.pool{max-height:520px;overflow:auto;padding-right:4px}
-.log-list{max-height:320px;overflow:auto}
+.pool{max-height:220px;overflow:auto}
+.log-list{max-height:240px;overflow:auto}
+.results{max-height:280px;overflow:auto}
 .memo-card,.result,.log-item{
-  text-align:left;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#101614;color:var(--text)
+  text-align:left;
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:10px 12px;
+  background:#fff;
 }
 .memo-card{cursor:pointer;width:100%}
-.memo-card:hover{border-color:#4d655b}
-.memo-card p,.result p,.log-item p{margin:6px 0 0;font-size:13px;line-height:1.45}
-.memo-head,.result-top,.log-head,.rate{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
-.rank{color:var(--accent);font-size:12px;margin-left:6px}
-.score{font-size:12px;color:var(--text)}
-.muted{color:var(--muted)}
-.rate{margin-top:10px;font-size:12px;color:var(--muted)}
-.rate button.on.yes{border-color:#2c5c4e;color:var(--ok)}
-.rate button.on.no{border-color:#6a2f38;color:var(--bad)}
-.empty{color:var(--muted);font-size:13px;margin:0}
+.memo-card:hover,.result:hover{border-color:#d4d4d8}
+.memo-card p,.result p,.log-item p{margin:6px 0 0;font-size:13px;line-height:1.5}
+.memo-head,.result-top,.log-head{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.rank{color:var(--foreground);font-size:12px;font-weight:600;margin-left:6px}
+.score{font-size:12px}
+.editor-shell{
+  position:relative;
+  background:#fff;
+  border:1px solid var(--border);
+  border-radius:12px;
+  box-shadow:var(--shadow);
+}
+#query{
+  position:relative;z-index:1;background:transparent;caret-color:var(--foreground);
+  min-height:320px;border:0;box-shadow:none;padding:16px 18px;font-size:16px;line-height:1.7;resize:vertical
+}
+#query:focus{box-shadow:none}
+.rate{
+  margin-top:10px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+  font-size:13px;
+}
+.rate > span{font-weight:600;min-width:5em}
+.rate button.on.yes{border-color:#6ee7b7;background:#ecfdf5;color:var(--ok)}
+.rate button.on.no{border-color:#fda4af;background:#fff1f2;color:var(--bad)}
+.empty{color:var(--muted-foreground);font-size:13px;margin:0}
+#keyStatus,#pathStatus{display:block;margin-top:8px}
+@media (max-width:960px){
+  #appShell{grid-template-columns:1fr}
+  .side{border-right:0;border-top:1px solid var(--border);order:2}
+  .main{padding:20px 16px 32px}
+}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>Memo relatedness</h1>
-    <p class="sub">Paste a query memo. Rank related notes from a fixed pool of <strong>36 Korean memos</strong>. Rate each suggestion Yes/No. The eval log stays in this browser so matching can improve later.</p>
-    <p class="compare-note">This is outbound relatedness, not category classify. The fixture has <code>ground_truth: null</code> — no answer key and no invented clusters. m31–m36 are first-class long / multi-topic dumps.</p>
-  </header>
-
-  <section class="panel">
-    <div class="section">Keys</div>
-    <label for="jevKey">TypeSafe Jev key. Saved as localStorage <code>jev_api_key</code>. Never committed. Used only for live TypeSafe <code>POST /v1/systemone</code>.</label>
-    <input id="jevKey" type="password" autocomplete="off" placeholder="paste key here, or leave empty for the keyword baseline" />
-    <div class="row">
-      <button type="button" id="saveKeysBtn">Save local key</button>
-      <button type="button" class="ghost" id="clearKeysBtn">Clear local key</button>
+<div id="appShell">
+  <aside class="side">
+    <p class="brand">도구</p>
+    <section class="card">
+      <div class="section">Keys</div>
+      <label for="jevKey">Jev 키. 이 브라우저에만 저장됩니다.</label>
+      <input id="jevKey" type="password" autocomplete="off" placeholder="비우면 단어 겹침 순위" />
+      <div class="row">
+        <button type="button" id="saveKeysBtn">Save local keys</button>
+        <button type="button" class="ghost" id="clearKeysBtn">Clear local keys</button>
+      </div>
       <span class="meta" id="keyStatus"></span>
-    </div>
-    <p class="meta" id="pathStatus" style="margin-top:8px"></p>
-  </section>
-
-  <div class="grid">
-    <div class="stack">
-      <section class="panel">
-        <div class="section">Query memo</div>
-        <label for="query">Paste or type a memo. Click a pool card to copy it here.</label>
-        <textarea id="query" placeholder="예: 편의점 삼각김밥이랑 바나나우유로 저녁 때움."></textarea>
-        <div class="row">
-          <button type="button" class="primary" id="findBtn">Find related</button>
-          <button type="button" class="ghost" id="clearQueryBtn">Clear</button>
-          <span class="badge" id="methodBadge">idle</span>
-        </div>
-        <p class="meta" id="resultMeta" style="margin-top:10px">No search yet.</p>
-        <div id="errorBox" class="error" hidden></div>
-      </section>
-
-      <section class="panel">
-        <div class="section">Ranked related memos</div>
-        <div id="results" class="results"></div>
-        <div class="row">
-          <button type="button" class="ghost" id="showAllBtn" hidden>Show all</button>
-        </div>
-        <label for="note" style="margin-top:12px">Optional note for this run</label>
-        <textarea id="note" style="min-height:72px" placeholder="What felt right or wrong about the ranking?"></textarea>
-      </section>
-    </div>
-
-    <section class="panel">
-      <div class="section">Pool · 36 memos · no answer key</div>
+      <p class="meta" id="pathStatus"></p>
+    </section>
+    <section class="card">
+      <div class="section">Find related</div>
+      <div class="row">
+        <button type="button" class="primary" id="findBtn">Find related</button>
+        <span class="badge" id="methodBadge">idle</span>
+      </div>
+      <p class="meta" id="resultMeta" style="margin-top:10px">No search yet.</p>
+      <div id="results" class="results"></div>
+      <div class="row">
+        <button type="button" class="ghost" id="showAllBtn" hidden>Show all</button>
+      </div>
+      <label for="note">Optional note for this relatedness run</label>
+      <textarea id="note" style="min-height:72px" placeholder="순위에서 맞거나 틀린 점"></textarea>
+    </section>
+    <section class="card">
+      <div class="section">Pool · 41 memos</div>
       <label for="poolSearch">Search the pool</label>
-      <input id="poolSearch" type="search" placeholder="id or text · e.g. m31, 세탁, 삼각김밥" />
+      <input id="poolSearch" type="search" placeholder="id or text · m37, 세탁" />
       <p class="meta" id="poolCount" style="margin:8px 0">0 / 0</p>
       <div id="pool" class="pool"></div>
     </section>
-  </div>
-
-  <section class="panel">
-    <div class="section">Eval log · localStorage <code>memoRelatednessEvalLog</code></div>
-    <p class="meta">Each Find related appends: timestamp, query, method (<code>heuristic</code> or <code>live_jev</code>), ranked id/rank/score, per-item Yes/No, optional note. Survives refresh on this browser.</p>
-    <div class="row">
-      <button type="button" id="exportJsonBtn">Download JSON</button>
-      <button type="button" id="exportJsonlBtn">Download JSONL</button>
-      <button type="button" class="ghost" id="clearLogBtn">Clear log</button>
+    <section class="card">
+      <div class="section">Eval log</div>
+      <p class="meta">localStorage <code>memoRelatednessEvalLog</code></p>
+      <div class="row">
+        <button type="button" id="exportJsonBtn">JSON</button>
+        <button type="button" id="exportJsonlBtn">JSONL</button>
+        <button type="button" class="ghost" id="clearLogBtn">Clear</button>
+      </div>
+      <div id="logList" class="log-list" style="margin-top:12px"></div>
+    </section>
+  </aside>
+  <main class="main">
+    <div class="main-inner">
+      <h1>메모</h1>
+      <p class="lede">메모를 쓰고, 풀에서 관련된 메모를 찾습니다.</p>
+      <label for="query">쓰는 중</label>
+      <div class="editor-shell">
+        <textarea id="query" placeholder="예: 금오산 케이블카 할인 여부"></textarea>
+      </div>
+      <div class="row">
+        <button type="button" class="ghost" id="clearQueryBtn">Clear pad</button>
+      </div>
+      <div id="errorBox" class="error" hidden></div>
     </div>
-    <div id="logList" class="log-list" style="margin-top:12px"></div>
-  </section>
+  </main>
 </div>
-<script src="/shared.js"></script>
+<script src="/phrases.js"></script>
+<script src="/relatedness.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

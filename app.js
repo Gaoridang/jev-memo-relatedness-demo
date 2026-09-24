@@ -1,6 +1,8 @@
 const LS_JEV = "jev_api_key";
 const LS_EVAL = "memoRelatednessEvalLog";
 
+localStorage.removeItem("openai_api_key");
+
 const els = {
   jevKey: document.getElementById("jevKey"),
   keyStatus: document.getElementById("keyStatus"),
@@ -27,17 +29,23 @@ const els = {
 
 let memos = [];
 let serverStatus = { jevEnv: false };
-let currentRun = null;
+let currentEntry = null;
 let showAll = false;
 let evalLog = loadEvalLog();
 
 function loadEvalLog() {
+  let stored = [];
   try {
-    const parsed = JSON.parse(localStorage.getItem(LS_EVAL) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
+    stored = JSON.parse(localStorage.getItem(LS_EVAL) || "[]");
   } catch (err) {
-    return [];
+    stored = [];
   }
+  const kept = keepRelatedRuns(stored);
+  const storedLength = Array.isArray(stored) ? stored.length : 0;
+  if (kept.length !== storedLength) {
+    localStorage.setItem(LS_EVAL, JSON.stringify(kept));
+  }
+  return kept;
 }
 
 function persistEvalLog() {
@@ -61,11 +69,11 @@ function renderKeyStatus() {
   els.keyStatus.textContent = parts.join(" · ");
   const path = livePath();
   if (path.mode === "proxy") {
-    els.pathStatus.textContent = "Find related will call /api/jev → TypeSafe POST /v1/systemone (live Noul).";
+    els.pathStatus.textContent = "Find related calls /api/jev → TypeSafe.";
   } else if (path.mode === "browser") {
-    els.pathStatus.textContent = "Find related will call TypeSafe from the browser with jev_api_key (live Noul).";
+    els.pathStatus.textContent = "Find related calls TypeSafe with jev_api_key.";
   } else {
-    els.pathStatus.textContent = "No key. Find related uses the labeled keyword/overlap baseline.";
+    els.pathStatus.textContent = "No Jev key. Find related uses the keyword baseline.";
   }
 }
 
@@ -82,6 +90,13 @@ function download(filename, text, type) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function renderPool() {
@@ -101,17 +116,9 @@ function renderPool() {
     card.innerHTML = `<div class="memo-head"><strong>${memo.id}</strong>${long}</div><p>${escapeHtml(memo.text)}</p>`;
     card.onclick = () => {
       els.query.value = memo.text;
-      els.query.focus();
     };
     els.pool.appendChild(card);
   }
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 function setBadge(method, extraClass) {
@@ -130,24 +137,29 @@ function setBadge(method, extraClass) {
   }
 }
 
+function memoText(id) {
+  const memo = memos.find((item) => item.id === id);
+  return memo ? memo.text : "";
+}
+
 function renderResults() {
   els.results.innerHTML = "";
-  if (!currentRun || !currentRun.ranked || !currentRun.ranked.length) {
+  if (!currentEntry || !currentEntry.ranked || !currentEntry.ranked.length) {
     els.results.innerHTML = '<p class="empty">Paste a query or click a pool memo, then Find related.</p>';
     els.showAllBtn.hidden = true;
     return;
   }
-  const rows = showAll ? currentRun.ranked : currentRun.ranked.slice(0, DEFAULT_RESULT_LIMIT);
-  els.showAllBtn.hidden = currentRun.ranked.length <= DEFAULT_RESULT_LIMIT;
+  const rows = showAll ? currentEntry.ranked : currentEntry.ranked.slice(0, DEFAULT_RESULT_LIMIT);
+  els.showAllBtn.hidden = currentEntry.ranked.length <= DEFAULT_RESULT_LIMIT;
   els.showAllBtn.textContent = showAll
     ? `Show top ${DEFAULT_RESULT_LIMIT}`
-    : `Show all ${currentRun.ranked.length}`;
+    : `Show all ${currentEntry.ranked.length}`;
 
   for (const row of rows) {
-    const rating = currentRun.ratings ? currentRun.ratings[row.id] : null;
+    const rating = currentEntry.ratings ? currentEntry.ratings[row.id] : null;
     const article = document.createElement("article");
     article.className = "result";
-    const long = row.long ? '<span class="pill long">long / multi-topic</span>' : "";
+    const long = isLongMemo(row.id) ? '<span class="pill long">long / multi-topic</span>' : "";
     article.innerHTML = `
       <div class="result-top">
         <div>
@@ -157,7 +169,7 @@ function renderResults() {
         </div>
         <div class="score">${formatScore(row.score)} <span class="muted">${escapeHtml(row.why || "")}</span></div>
       </div>
-      <p>${escapeHtml(row.text)}</p>
+      <p>${escapeHtml(memoText(row.id))}</p>
       <div class="rate">
         <span>Related?</span>
         <button type="button" data-rate="yes" class="${rating === "yes" ? "on yes" : ""}">Yes</button>
@@ -178,46 +190,42 @@ function formatScore(score) {
 
 function renderLog() {
   els.logList.innerHTML = "";
-  if (!evalLog.length) {
-    els.logList.innerHTML = '<p class="empty">No eval rows yet. Ratings persist in localStorage.</p>';
+  const rows = evalLog.filter((entry) => entry && (entry.kind == null || entry.kind === "related_run"));
+  if (!rows.length) {
+    els.logList.innerHTML = '<p class="empty">No eval rows yet.</p>';
     return;
   }
-  const latest = [...evalLog].reverse();
+  const latest = [...rows].reverse();
   for (const entry of latest) {
-    const yes = Object.values(entry.ratings || {}).filter((v) => v === "yes").length;
-    const no = Object.values(entry.ratings || {}).filter((v) => v === "no").length;
     const item = document.createElement("div");
     item.className = "log-item";
+    const yes = Object.values(entry.ratings || {}).filter((v) => v === "yes").length;
+    const no = Object.values(entry.ratings || {}).filter((v) => v === "no").length;
     item.innerHTML = `
       <div class="log-head">
-        <strong>${escapeHtml(entry.method)}</strong>
-        <span>${escapeHtml(entry.ts)}</span>
+        <span class="badge">${escapeHtml(entry.kind || "related_run")}</span>
+        <strong>${escapeHtml(entry.method || "")}</strong>
+        <span>${escapeHtml(entry.ts || "")}</span>
       </div>
-      <p>${escapeHtml(entry.query)}</p>
-      <div class="muted">suggestions ${entry.ranked.length} · Yes ${yes} · No ${no}${entry.note ? ` · note: ${escapeHtml(entry.note)}` : ""}</div>
+      <p>${escapeHtml(entry.query || "")}</p>
+      <div class="muted">suggestions ${(entry.ranked || []).length} · Yes ${yes} · No ${no}${entry.note ? ` · note: ${escapeHtml(entry.note)}` : ""}</div>
     `;
     els.logList.appendChild(item);
   }
 }
 
 function rateRow(id, rating) {
-  if (!currentRun) return;
-  currentRun.ratings[id] = rating;
-  if (evalLog[evalLog.length - 1]) {
-    setEvalRating(evalLog[evalLog.length - 1], id, rating);
-    persistEvalLog();
-  }
+  if (!currentEntry) return;
+  setEvalRating(currentEntry, id, rating);
+  persistEvalLog();
   renderResults();
   renderLog();
 }
 
 function persistNote() {
-  if (!currentRun) return;
-  currentRun.note = els.note.value;
-  if (evalLog[evalLog.length - 1]) {
-    evalLog[evalLog.length - 1].note = els.note.value;
-    persistEvalLog();
-  }
+  if (!currentEntry) return;
+  currentEntry.note = els.note.value;
+  persistEvalLog();
   renderLog();
 }
 
@@ -277,8 +285,8 @@ async function callLiveJev(query, candidates) {
 
 async function findRelated() {
   showError("");
-  const query = els.query.value;
-  if (!normalizeText(query)) {
+  const query = document.getElementById("query").value;
+  if (!String(query || "").trim()) {
     showError("Query memo is empty.");
     return;
   }
@@ -287,7 +295,7 @@ async function findRelated() {
   els.findBtn.disabled = true;
   els.methodBadge.textContent = "working";
   els.methodBadge.className = "badge";
-  els.resultMeta.textContent = "Scoring the 36-memo pool…";
+  els.resultMeta.textContent = "Scoring the 41-memo pool…";
   try {
     const path = livePath();
     if (path.mode === "none") {
@@ -302,6 +310,10 @@ async function findRelated() {
     const live = await callLiveJev(query, candidates);
     if (!live.called) {
       const heuristic = rankHeuristic(query, memos);
+      if (!heuristic.ok) {
+        showError(heuristic.error);
+        return;
+      }
       commitRun(query, heuristic);
       return;
     }
@@ -309,7 +321,7 @@ async function findRelated() {
       setBadge("error");
       els.resultMeta.textContent = live.error;
       showError(`${live.error}\n${live.detail || ""}`);
-      currentRun = null;
+      currentEntry = null;
       renderResults();
       return;
     }
@@ -319,7 +331,7 @@ async function findRelated() {
     const message = err && err.message ? err.message : String(err);
     showError(message);
     els.resultMeta.textContent = message;
-    currentRun = null;
+    currentEntry = null;
     renderResults();
   } finally {
     els.findBtn.disabled = false;
@@ -335,15 +347,8 @@ function commitRun(query, result) {
     note: els.note.value,
   });
   evalLog.push(entry);
+  currentEntry = entry;
   persistEvalLog();
-  currentRun = {
-    method: result.method,
-    label: result.label,
-    model: result.model || null,
-    ranked: result.ranked,
-    ratings: entry.ratings,
-    note: entry.note,
-  };
   setBadge(result.method);
   const modelBit = result.model ? ` · model ${result.model}` : "";
   els.resultMeta.textContent = `${result.label} · compared ${result.ranked.length} of ${memos.length} memos${modelBit}`;
@@ -355,7 +360,9 @@ async function loadServerStatus() {
   try {
     const res = await fetch("/api/status", { method: "GET" });
     const data = await res.json();
-    serverStatus = { jevEnv: Boolean(data && data.jevEnv) };
+    serverStatus = {
+      jevEnv: Boolean(data && data.jevEnv),
+    };
   } catch (err) {
     serverStatus = { jevEnv: false };
   }
@@ -374,8 +381,8 @@ async function loadCorpus() {
 }
 
 els.saveKeysBtn.onclick = () => {
-  const key = els.jevKey.value.trim();
-  if (key) localStorage.setItem(LS_JEV, key);
+  const jev = els.jevKey.value.trim();
+  if (jev) localStorage.setItem(LS_JEV, jev);
   else localStorage.removeItem(LS_JEV);
   els.jevKey.value = "";
   renderKeyStatus();
@@ -390,7 +397,7 @@ els.clearKeysBtn.onclick = () => {
 els.findBtn.onclick = findRelated;
 els.clearQueryBtn.onclick = () => {
   els.query.value = "";
-  currentRun = null;
+  currentEntry = null;
   showError("");
   setBadge("idle");
   els.resultMeta.textContent = "No search yet.";
@@ -403,17 +410,17 @@ els.showAllBtn.onclick = () => {
 els.poolSearch.addEventListener("input", renderPool);
 els.note.addEventListener("input", persistNote);
 els.exportJsonBtn.onclick = () => {
-  download(`memo-relatedness-eval.json`, toEvalJson(evalLog), "application/json");
+  download("memo-relatedness-eval.json", toEvalJson(evalLog), "application/json");
 };
 els.exportJsonlBtn.onclick = () => {
-  download(`memo-relatedness-eval.jsonl`, toEvalJsonl(evalLog), "application/jsonl");
+  download("memo-relatedness-eval.jsonl", toEvalJsonl(evalLog), "application/jsonl");
 };
 els.clearLogBtn.onclick = () => {
   if (!evalLog.length) return;
   if (!window.confirm("Clear the eval log from this browser?")) return;
   evalLog = [];
   persistEvalLog();
-  currentRun = null;
+  currentEntry = null;
   els.note.value = "";
   renderLog();
   renderResults();

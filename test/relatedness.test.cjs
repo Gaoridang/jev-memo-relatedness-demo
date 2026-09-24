@@ -11,10 +11,12 @@ const {
   parseRelatednessAnswers,
   makeEvalEntry,
   setEvalRating,
+  keepRelatedRuns,
   toEvalJson,
   toEvalJsonl,
   excludeSelf,
-} = require("../shared");
+} = require("../relatedness");
+const { extractPhrases } = require("../phrases");
 
 const fixturePath = path.join(__dirname, "..", "fixtures", "korean-memo-relatedness-30.json");
 const corpus = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
@@ -22,16 +24,30 @@ const corpus = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
 const checked = assertCorpus(corpus);
 assert.equal(checked.ok, true, checked.error);
 assert.equal(corpus.ground_truth, null);
-assert.equal(corpus.count, 36);
-assert.equal(corpus.memos.length, 36);
+assert.equal(corpus.count, 41);
+assert.equal(corpus.memos.length, 41);
 assert.deepEqual(
   corpus.memos.map((m) => m.id),
   EXPECTED_IDS
 );
-assert.equal(EXPECTED_COUNT, 36);
-assert.deepEqual(LONG_MEMO_IDS, ["m31", "m32", "m33", "m34", "m35", "m36"]);
+assert.equal(EXPECTED_COUNT, 41);
+assert.deepEqual(LONG_MEMO_IDS, [
+  "m31",
+  "m32",
+  "m33",
+  "m34",
+  "m35",
+  "m36",
+  "m37",
+  "m38",
+  "m39",
+  "m40",
+  "m41",
+]);
 assert.ok(!("clusters" in corpus));
 assert.ok(!("expected_pairs" in corpus));
+assert.equal(corpus.ground_truth, null);
+assert.ok(corpus.memos.find((m) => m.id === "m37"));
 
 for (const id of LONG_MEMO_IDS) {
   const memo = corpus.memos.find((m) => m.id === id);
@@ -45,7 +61,7 @@ assert.equal(empty.ok, false);
 const food = rankHeuristic("편의점 삼각김밥이랑 바나나우유로 저녁 때움.", corpus.memos);
 assert.equal(food.ok, true);
 assert.equal(food.method, "heuristic");
-assert.ok(food.all.length >= 35);
+assert.ok(food.all.length >= 40);
 assert.equal(
   food.all.some((row) => row.id === "m29"),
   false,
@@ -74,7 +90,7 @@ const laundryHits = laundry.ranked.filter((row) => row.score > 0).map((row) => r
 assert.ok(laundryHits.includes("m08") || laundryHits.includes("m31"));
 
 const poolOnly = excludeSelf(corpus.memos[0].text, corpus.memos);
-assert.equal(poolOnly.length, 35);
+assert.equal(poolOnly.length, 40);
 assert.equal(
   poolOnly.some((m) => m.id === "m01"),
   false
@@ -136,6 +152,7 @@ const entry = makeEvalEntry({
   method: "heuristic",
   ranked: food.ranked.slice(0, 3),
 });
+assert.equal(entry.kind, "related_run");
 assert.equal(entry.method, "heuristic");
 assert.equal(entry.query, "테스트 쿼리");
 assert.ok(entry.ts);
@@ -150,5 +167,83 @@ const json = JSON.parse(toEvalJson([entry]));
 assert.equal(json[0].method, "heuristic");
 const jsonl = toEvalJsonl([entry, entry]);
 assert.equal(jsonl.trim().split("\n").length, 2);
+
+const tied = rankHeuristic("Core ML", [
+  { id: "m01", text: "core ml notes" },
+  { id: "m02", text: "Core ML notes" },
+]);
+assert.equal(tied.ranked.length, 2);
+assert.equal(tied.ranked[0].score, tied.ranked[1].score);
+assert.equal(tied.ranked[0].id, "m02");
+assert.equal(tied.ranked[1].id, "m01");
+assert.deepEqual(tied.ranked[0].phraseHits, ["Core ML"]);
+assert.deepEqual(tied.ranked[1].phraseHits, []);
+assert.equal(tied.ranked[0].why.includes("names: Core ML"), true);
+
+const tiedExport = makeEvalEntry({
+  query: "Core ML",
+  method: "heuristic",
+  ranked: tied.ranked,
+});
+assert.deepEqual(tiedExport.ranked[0].phraseHits, ["Core ML"]);
+assert.deepEqual(tiedExport.ranked[1].phraseHits, []);
+const liveExport = makeEvalEntry({
+  query: "q",
+  method: "live_jev",
+  ranked: liveShape.ranked,
+});
+assert.deepEqual(liveExport.ranked[0].phraseHits, []);
+assert.deepEqual(liveExport.ranked[1].phraseHits, []);
+
+const phraseSurfaces = {
+  m02: ["공임나라"],
+  m11: ["경희대"],
+  m32: ["Bookclub", "AWAIT_USER", "Writing Helper", "X Digger"],
+  m33: ["Core ML", "Mac", "Neural Engine", "Vercel", "URL", "README"],
+  m36: ["TypeSafe Jev"],
+  m37: ["금오산", "학생회관", "김자영", "한경국립대", "충남대", "전남대", "김현철", "경북대", "서울과기대", "정송철"],
+  m38: ["HDMI", "박지훈", "박지현", "김수연", "이도윤"],
+  m39: ["Frother", "USB"],
+  m40: ["학생회관", "최유진", "한도겸"],
+};
+for (const memo of corpus.memos) {
+  assert.deepEqual(
+    extractPhrases(memo.text).map((phrase) => phrase.surface),
+    phraseSurfaces[memo.id] || [],
+    memo.id
+  );
+}
+
+const m33 = corpus.memos.find((memo) => memo.id === "m33");
+const m33Phrases = extractPhrases(m33.text);
+const coreMl = m33Phrases.find((phrase) => phrase.surface === "Core ML");
+assert.deepEqual(
+  { surface: coreMl.surface, key: coreMl.key, kind: coreMl.kind },
+  { surface: "Core ML", key: "core ml", kind: "latin" }
+);
+assert.equal(coreMl.end - coreMl.start, 7);
+assert.equal(m33Phrases.some((phrase) => phrase.surface === "Day0"), false);
+assert.equal(m33Phrases.some((phrase) => phrase.surface === "ML"), false);
+
+const m37Surfaces = extractPhrases(corpus.memos.find((memo) => memo.id === "m37").text).map(
+  (phrase) => phrase.surface
+);
+assert.equal(m37Surfaces.includes("G437"), false);
+assert.equal(m37Surfaces.includes("신청자"), false);
+assert.equal(m37Surfaces.includes("이슈가"), false);
+assert.equal(m37Surfaces.includes("이름표"), false);
+
+const keptOnce = keepRelatedRuns([
+  { kind: "related_run", id: "a" },
+  { id: "b" },
+  { kind: "theme_chunk", id: "c" },
+]);
+assert.deepEqual(keptOnce, [
+  { kind: "related_run", id: "a" },
+  { id: "b" },
+]);
+assert.deepEqual(keepRelatedRuns(keptOnce), keptOnce);
+
+assert.equal(require("../relatedness").buildThemeChunkRequest, undefined);
 
 console.log("relatedness.test.cjs passed");
