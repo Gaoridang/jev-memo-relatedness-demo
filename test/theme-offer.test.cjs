@@ -141,8 +141,59 @@ assert.equal(mixed.second >= TAG_TOP, true);
 assert.equal(mixed.margin < TAG_MARGIN, true);
 assert.equal(mixed.offer.kind, "ask");
 
+const avengersBare = classifyChunkTags(input("어벤저스 보기"));
+assert.equal(avengersBare.disposition, "quiet");
+assert.equal(avengersBare.top, 0);
+assert.equal(avengersBare.margin, 0);
+assert.equal(avengersBare.offer.kind, "quiet");
+
+const starbucksBare = classifyChunkTags(input("스타벅스에서 아메리카노"));
+assert.equal(starbucksBare.disposition, "quiet");
+assert.equal(starbucksBare.top, 0);
+assert.equal(starbucksBare.offer.kind, "quiet");
+
+function liveThemes(themes) {
+  return { method: "live_jev", ok: true, themes };
+}
+
+const avengersLive = classifyChunkTags(
+  input("어벤저스 보기", {
+    judged: liveThemes([
+      { label: "카페", score: 0.6 },
+      { label: "개인·생활", score: 0.2 },
+      { label: "업무", score: 0.1 },
+      { label: "행사·협의", score: 0.05 },
+    ]),
+  })
+);
+assert.equal(avengersLive.top, 0.6);
+assert.equal(avengersLive.margin, 0.5);
+assert.equal(avengersLive.disposition, "ready");
+assert.equal(avengersLive.offer.kind, "children");
+assert.equal(avengersLive.offer.parentId, "life");
+assert.equal(avengersLive.offer.childLabels.includes("카페"), true);
+assert.equal(avengersLive.choice.kind, "child");
+assert.equal(avengersLive.choice.label, "카페");
+
+const avengersUnmapped = classifyChunkTags(
+  input("어벤저스 보기", {
+    judged: liveThemes([{ label: "영화", score: 0.88 }]),
+  })
+);
+assert.equal(avengersUnmapped.disposition, "quiet");
+assert.equal(avengersUnmapped.top, 0);
+assert.equal(avengersUnmapped.offer.kind, "quiet");
+
+const jevDown = classifyChunkTags(
+  input("스타벅스에서 아메리카노", {
+    judged: { method: "live_jev", error: "HTTP 500", themes: [] },
+  })
+);
+assert.equal(jevDown.disposition, "quiet");
+assert.equal(jevDown.top, 0);
+
 const halted = classifyChunkTags(
-  input("아무 말", { judged: { themes: [{ label: "카페", score: 0.13 }] } })
+  input("아무 말", { judged: liveThemes([{ label: "카페", score: 0.13 }]) })
 );
 assert.equal(halted.disposition, "quiet");
 assert.equal(halted.offer.kind, "quiet");
