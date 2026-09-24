@@ -566,6 +566,18 @@ function buildThemeChunkRequest(chunk, priorThemes) {
     instructions: [THEME_NONE_INSTRUCTIONS, { active_chunk: c }],
     criteria: { ...THEME_NONE_CRITERIA },
   };
+  const catalog = readCatalogVocab();
+  for (let i = 0; i < catalog.length; i += 1) {
+    const key = `catalog_${i}`;
+    questions[key] = {
+      type: "noul",
+      instructions: [
+        THEME_MATCH_INSTRUCTIONS,
+        { active_chunk: c, theme_id: key, theme_label: catalog[i].label },
+      ],
+      criteria: { ...THEME_MATCH_CRITERIA },
+    };
+  }
   return {
     model: JEV_MODEL,
     state: {
@@ -611,18 +623,18 @@ function parseThemeChunkAnswers(payload, priorThemes, chunk) {
   const chunkText =
     chunk ||
     (payload.state && typeof payload.state.active_chunk === "string" ? payload.state.active_chunk : "");
-  const vocab = matchFixedThemeVocab(chunkText);
-  if (vocab.label && vocab.score >= 0.42) {
-    const existing = themes.find((theme) => theme.label === vocab.label);
-    if (existing) {
-      existing.score = Number(Math.max(existing.score, vocab.score).toFixed(4));
-    } else {
-      themes.push({
-        id: vocab.id || "vocab",
-        label: vocab.label,
-        score: vocab.score,
-      });
+  const catalog = readCatalogVocab();
+  for (let i = 0; i < catalog.length; i += 1) {
+    const key = `catalog_${i}`;
+    const answer = answers[key];
+    if (!answer) continue;
+    if (answer.type !== "noul" || typeof answer.noul !== "number") {
+      return { ok: false, error: `Noul answer missing for ${key}` };
     }
+    const score = Number(answer.noul.toFixed(4));
+    const existing = themes.find((theme) => theme.label === catalog[i].label);
+    if (existing) existing.score = Number(Math.max(existing.score, score).toFixed(4));
+    else themes.push({ id: key, label: catalog[i].label, score });
   }
   themes.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;

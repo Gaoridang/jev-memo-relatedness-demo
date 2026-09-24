@@ -95,8 +95,6 @@ for (const parentId of PARENT_IDS) {
   }
 }
 
-const DRINK_WORDS = Object.freeze(["커피", "음료", "술", "소주", "맥주"]);
-const DRINK_ASK_PROMPT = "업무긴데 모호합니다. 어디로 둘까요?";
 const PARENT_ASK_PROMPT = "어느 쪽으로 둘까요?";
 const TAG_TOP = 0.54;
 const TAG_MARGIN = 0.12;
@@ -285,44 +283,52 @@ function parseTheme(value) {
   throw new Error("unknown phase");
 }
 
-function scoreOf(hits) {
-  if (!hits) return 0;
-  return Number(Math.min(0.95, 0.42 + hits * 0.12).toFixed(4));
+function isLiveJudgment(judged) {
+  return Boolean(
+    judged &&
+      judged.method === "live_jev" &&
+      !judged.error &&
+      judged.ok !== false &&
+      Array.isArray(judged.themes)
+  );
 }
 
-function keywordBuckets(text) {
-  const lower = String(text || "").toLowerCase();
-  const childHits = { work: new Map(), life: new Map(), event: new Map() };
-  for (const [keyword, rows] of CHILD_KEYWORD_INDEX) {
-    if (!lower.includes(keyword)) continue;
-    for (const row of rows) {
-      const bucket = childHits[row.parentId];
-      bucket.set(row.label, (bucket.get(row.label) || 0) + 1);
-    }
+function emptyScoreTable() {
+  const parentScores = {};
+  const childScores = {};
+  for (const parentId of PARENT_IDS) {
+    parentScores[parentId] = 0;
+    childScores[parentId] = new Map();
   }
-  const parentHits = {};
-  for (const parent of PARENTS) {
-    let hits = 0;
-    for (const keyword of parent.keywords) {
-      if (lower.includes(String(keyword).toLowerCase())) hits += 1;
-    }
-    parentHits[parent.id] = hits;
-  }
-  return { childHits, parentHits };
+  return { parentScores, childScores };
 }
 
-function childLabelsInOrder(parentId, bucket) {
+function catalogScoreTable(judged) {
+  const table = emptyScoreTable();
+  if (!isLiveJudgment(judged)) return table;
+  for (const theme of judged.themes) {
+    if (!theme || typeof theme.score !== "number" || !Number.isFinite(theme.score)) continue;
+    const parent = PARENTS.find((item) => item.label === theme.label);
+    if (parent) {
+      table.parentScores[parent.id] = Math.max(table.parentScores[parent.id], theme.score);
+    }
+    for (const parentId of PARENT_IDS) {
+      const child = CHILDREN_BY_PARENT[parentId].find((item) => item.label === theme.label);
+      if (!child) continue;
+      const prev = table.childScores[parentId].get(child.label) || 0;
+      table.childScores[parentId].set(child.label, Math.max(prev, theme.score));
+      table.parentScores[parentId] = Math.max(table.parentScores[parentId], theme.score);
+    }
+  }
+  return table;
+}
+
+function childLabelsFromScores(parentId, table) {
   const labels = [];
   for (const child of CHILDREN_BY_PARENT[parentId]) {
-    if (bucket.get(child.label)) labels.push(child.label);
+    if (table.childScores[parentId].get(child.label)) labels.push(child.label);
   }
   return labels;
-}
-
-function parentScore(parentId, buckets) {
-  const scores = [scoreOf(buckets.parentHits[parentId])];
-  for (const hits of buckets.childHits[parentId].values()) scores.push(scoreOf(hits));
-  return Math.max(...scores);
 }
 
 function rankParents(scores) {
@@ -330,38 +336,6 @@ function rankParents(scores) {
     if (scores[b] !== scores[a]) return scores[b] - scores[a];
     return PARENT_IDS.indexOf(a) - PARENT_IDS.indexOf(b);
   });
-}
-
-function tokenChildren(text) {
-  const norm = normalizeText(text);
-  if (!norm || /^\d+$/.test(norm)) return [];
-  const labels = [];
-  const seen = new Set();
-  for (const word of norm.split(/\s+/)) {
-    const core = word.replace(/^[^A-Za-z0-9가-힣]+|[^A-Za-z0-9가-힣]+$/g, "");
-    let token = null;
-    if (/^[A-Za-z]{1,6}\d{1,6}$/.test(core)) token = core;
-    else if (/^[1-9]\d{2,4}$/.test(core)) token = core;
-    if (!token || seen.has(token)) continue;
-    seen.add(token);
-    labels.push(token);
-  }
-  return labels;
-}
-
-function drinkCount(text) {
-  const raw = String(text || "");
-  return DRINK_WORDS.filter((word) => raw.includes(word)).length;
-}
-
-function strongChild(buckets) {
-  const oneHit = scoreOf(1);
-  for (const parentId of PARENT_IDS) {
-    for (const hits of buckets.childHits[parentId].values()) {
-      if (scoreOf(hits) >= oneHit) return true;
-    }
-  }
-  return false;
 }
 
 function priorParentIds(priors) {
@@ -384,25 +358,17 @@ function priorParentIds(priors) {
   return ids;
 }
 
-function bestChildHit(buckets) {
+function bestChildScore(table) {
   let best = null;
   for (const parentId of PARENT_IDS) {
     for (const child of CHILDREN_BY_PARENT[parentId]) {
-      const hits = buckets.childHits[parentId].get(child.label) || 0;
-      if (!hits) continue;
-      const score = scoreOf(hits);
+      const score = table.childScores[parentId].get(child.label) || 0;
+      if (!score) continue;
       const parents = child.parents ? child.parents.slice() : [parentId];
       if (!best || score > best.score) best = { parentId, label: child.label, score, parents };
     }
   }
   return best;
-}
-
-function drinkAsk() {
-  return askOffer(DRINK_ASK_PROMPT, [
-    { id: "work", choice: { kind: "parent", id: "work" } },
-    { id: "life", choice: { kind: "parent", id: "life" } },
-  ]);
 }
 
 function parentAsk(topId, secondId) {
@@ -416,34 +382,35 @@ function menuFirst(parentId) {
   return parentMenuOffer([parentId].concat(PARENT_IDS.filter((id) => id !== parentId)));
 }
 
-function childrenForChunk(parentId, chunkText) {
-  const buckets = keywordBuckets(chunkText);
-  const labels = childLabelsInOrder(parentId, buckets.childHits[parentId]);
-  if (parentId === "work" || parentId === "event") {
-    for (const token of tokenChildren(chunkText)) {
-      if (!labels.includes(token)) labels.push(token);
-    }
-  }
-  return labels;
+function childrenForChunk(parentId, judged) {
+  return childLabelsFromScores(parentId, catalogScoreTable(judged));
 }
 
-function settleOffer(choice, chunkText) {
+function settleOffer(choice, chunkText, judged) {
   const parsed = parseChoice(choice);
   if (parsed.kind === "fallback") return fallbackOffer();
   if (parsed.kind === "custom") return customOffer(parsed.label);
   if (parsed.kind === "parent") {
-    const labels = childrenForChunk(parsed.id, chunkText);
+    const labels = childrenForChunk(parsed.id, judged);
     if (labels.length) return childrenOffer(parsed.id, labels);
     return menuFirst(parsed.id);
   }
-  const labels = childrenForChunk(parsed.parentId, chunkText);
-  if (!labels.includes(parsed.label)) labels.push(parsed.label);
+  const labels = childrenForChunk(parsed.parentId, judged);
+  if (isCatalogChild(parsed.parentId, parsed.label) && !labels.includes(parsed.label)) {
+    labels.push(parsed.label);
+  }
+  if (!labels.length) return menuFirst(parsed.parentId);
   return childrenOffer(parsed.parentId, labels);
 }
 
-function committedTheme(choice, chunkText) {
+function isCatalogChild(parentId, label) {
+  const children = CHILDREN_BY_PARENT[parentId] || [];
+  return children.some((child) => child.label === label);
+}
+
+function committedTheme(choice, chunkText, judged) {
   const parsed = parseChoice(choice);
-  const offer = settleOffer(parsed, chunkText);
+  const offer = settleOffer(parsed, chunkText, judged);
   if (offer.kind === "ask") throw new Error("committed theme cannot ask");
   return { phase: "committed", choice: parsed, offer };
 }
@@ -476,46 +443,26 @@ function gatePair(top, second) {
   };
 }
 
-function applyJudgedParentScores(scores, judged) {
-  const themes = judged && Array.isArray(judged.themes) ? judged.themes : [];
-  for (const theme of themes) {
-    if (!theme || typeof theme.score !== "number") continue;
-    const parent = PARENTS.find((item) => item.label === theme.label);
-    if (parent) scores[parent.id] = Math.max(scores[parent.id], theme.score);
-    for (const parentId of PARENT_IDS) {
-      if (CHILDREN_BY_PARENT[parentId].some((child) => child.label === theme.label)) {
-        scores[parentId] = Math.max(scores[parentId], theme.score);
-      }
-    }
-  }
-}
-
-function offerForWinner(text, buckets, topId, priors) {
-  const best = bestChildHit(buckets);
+function offerForWinner(table, topId, priors) {
+  const best = bestChildScore(table);
   const priorHome = priorParentIds(priors).find(
     (id) => best && best.parents.includes(id) && id !== best.parentId
   );
   const parentId = best && priorHome ? priorHome : topId;
-  const labels = childLabelsInOrder(parentId, buckets.childHits[parentId]);
+  const labels = childLabelsFromScores(parentId, table);
   if (best && priorHome && !labels.includes(best.label)) labels.push(best.label);
-  if (parentId === "work" || parentId === "event") {
-    for (const token of tokenChildren(text)) {
-      if (!labels.includes(token)) labels.push(token);
-    }
-  }
   if (labels.length) return childrenOffer(parentId, labels);
   return parentOneOffer(parentId);
 }
 
-function leadingChoice(offer, buckets) {
+function leadingChoice(offer, table) {
   if (!offer) return null;
   if (offer.kind === "parent-one") return { kind: "parent", id: offer.id };
   if (offer.kind !== "children") return null;
   let bestLabel = offer.childLabels[0];
   let bestScore = -1;
   for (const label of offer.childLabels) {
-    const hits = buckets.childHits[offer.parentId].get(label) || 0;
-    const score = hits ? scoreOf(hits) : 0;
+    const score = table.childScores[offer.parentId].get(label) || 0;
     if (score > bestScore) {
       bestScore = score;
       bestLabel = label;
@@ -527,19 +474,11 @@ function leadingChoice(offer, buckets) {
 function classifyChunkTags(input) {
   const src = input || {};
   const text = normalizeText(src.chunkText);
-  if (!text || /^\d+$/.test(text)) {
+  if (!text || /^\d+$/.test(text) || !isLiveJudgment(src.judged)) {
     return { ...gatePair(0, 0), offer: quietOffer(), choice: null, topId: null, secondId: null };
   }
-  const buckets = keywordBuckets(text);
-  const scores = {};
-  for (const parentId of PARENT_IDS) scores[parentId] = parentScore(parentId, buckets);
-  applyJudgedParentScores(scores, src.judged);
-  const drinks = drinkCount(text);
-  if (drinks) {
-    const drinkScore = scoreOf(drinks);
-    scores.work = Math.max(scores.work, drinkScore);
-    scores.life = Math.max(scores.life, drinkScore);
-  }
+  const table = catalogScoreTable(src.judged);
+  const scores = table.parentScores;
   const ranked = rankParents(scores);
   const topId = ranked[0];
   const secondId = ranked[1];
@@ -548,15 +487,10 @@ function classifyChunkTags(input) {
     return { ...gate, offer: quietOffer(), choice: null, topId, secondId };
   }
   if (gate.disposition === "ask") {
-    const drinkGap = Math.abs(scores.work - scores.life);
-    const offer =
-      drinks && !strongChild(buckets) && scores.work >= TAG_TOP && scores.life >= TAG_TOP && drinkGap < TAG_MARGIN
-        ? drinkAsk()
-        : parentAsk(topId, secondId);
-    return { ...gate, offer, choice: null, topId, secondId };
+    return { ...gate, offer: parentAsk(topId, secondId), choice: null, topId, secondId };
   }
-  const offer = offerForWinner(text, buckets, topId, src.priors);
-  return { ...gate, offer, choice: leadingChoice(offer, buckets), topId, secondId };
+  const offer = offerForWinner(table, topId, src.priors);
+  return { ...gate, offer, choice: leadingChoice(offer, table), topId, secondId };
 }
 
 function decideOffer(input) {
@@ -565,7 +499,9 @@ function decideOffer(input) {
 
 function proposeTheme(theme, input) {
   const current = parseTheme(theme);
-  if (current.phase === "committed") return committedTheme(current.choice, input && input.chunkText);
+  if (current.phase === "committed") {
+    return committedTheme(current.choice, input && input.chunkText, input && input.judged);
+  }
   return openTheme(decideOffer(input));
 }
 

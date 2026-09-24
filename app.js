@@ -126,7 +126,7 @@ function renderKeyStatus() {
       `Theme match via TypeSafe with jev_api_key. ${invent}`;
   } else {
     els.pathStatus.textContent =
-      `No Jev key. Theme match uses labeled keyword/vocab baseline. ${invent}`;
+      `No Jev key. Tag gate stays quiet. Find related still uses the keyword baseline. ${invent}`;
   }
 }
 

@@ -173,7 +173,12 @@ const canned = parseThemeChunkAnswers(
 );
 assert.equal(canned.ok, false);
 
-const liveDrift = parseThemeChunkAnswers(
+const oilRequest = buildThemeChunkRequest("엔진오일 갈았다.", [{ id: "t1", label: "세탁" }]);
+const vehicleKey = Object.keys(oilRequest.questions).find((key) =>
+  JSON.stringify(oilRequest.questions[key].instructions).includes("차량")
+);
+assert.equal(typeof vehicleKey, "string");
+const keywordOnly = parseThemeChunkAnswers(
   {
     model: "jev-1.13.0",
     answers: {
@@ -185,11 +190,29 @@ const liveDrift = parseThemeChunkAnswers(
   [{ id: "t1", label: "세탁" }],
   "엔진오일 갈았다"
 );
+assert.equal(keywordOnly.ok, true);
+assert.equal(
+  keywordOnly.themes.some((t) => t.label === "차량"),
+  false
+);
+const liveDrift = parseThemeChunkAnswers(
+  {
+    model: "jev-1.13.0",
+    answers: {
+      match_t1: { type: "noul", noul: 0.12 },
+      new_topic: { type: "noul", noul: 0.81 },
+      none_topic: { type: "noul", noul: 0.04 },
+      [vehicleKey]: { type: "noul", noul: 0.8 },
+    },
+  },
+  [{ id: "t1", label: "세탁" }],
+  "엔진오일 갈았다"
+);
 assert.equal(liveDrift.ok, true);
 assert.equal(liveDrift.method, "live_jev");
 assert.equal(liveDrift.model, "jev-1.13.0");
 assert.equal(liveDrift.needsTitle, false);
-assert.ok(liveDrift.themes.some((t) => t.label === "차량"));
+assert.ok(liveDrift.themes.some((t) => t.label === "차량" && t.score === 0.8));
 assert.equal(liveDrift.newScore, 0.81);
 assert.ok(!liveDrift.themes.some((t) => String(t.label || "").includes("엔진오일")));
 assert.equal(liveDrift.drift, true);

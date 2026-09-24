@@ -15,18 +15,18 @@ The corpus fixture is `fixtures/korean-memo-relatedness-30.json` (filename kept;
 5. **새 메모로 열기** opens a dialog. The dialog text starts as that chunk and keeps the chunk's sticky label and ratings. Dismiss leaves the original pad untouched. Confirm appends a new pad, removes that paragraph from the original pad, and opens the new pad. `sessionThemePriors` stay.
 6. **같은 주제예요** sets `shouldNotSplit` and hides the nudge.
 
-With a TypeSafe key (`JEV_API_KEY` on Vercel and/or localStorage `jev_api_key`) the page sends `{ mode: "theme_chunk", chunk, priorThemes }` to `/api/jev` (or TypeSafe from the browser). The request is Noul per prior theme plus `new_topic` and `none_topic`. The model is the account default `jev-latest`. Failures show the real HTTP or parse error. There are no mocks.
+With a TypeSafe key (`JEV_API_KEY` on Vercel and/or localStorage `jev_api_key`) the page sends `{ mode: "theme_chunk", chunk, priorThemes }` to `/api/jev` (or TypeSafe from the browser). The request is Noul per prior theme, Noul per closed catalog label, plus `new_topic` and `none_topic`. The model is the account default `jev-latest`. Failures show the real HTTP or parse error. There are no mocks.
 
-Chip labels never come from chunk word prefixes. The judge first matches **session priors + a fixed Korean theme vocab**. You can also type a custom tag. If there is still no good match and an OpenAI key is present (`OPENAI_API_KEY` on Vercel and/or localStorage `openai_api_key`), the page calls Chat Completions with Sol (`gpt-5.6-sol`) to invent a **short theme title**, then stores that label in session priors. A title still has to clear the tag gate below before the page shows it.
+Chip labels never come from chunk word prefixes or keyword hits. Shown tags are closed catalog labels that cleared the gate, or a custom tag you type. If there is still no good match and an OpenAI key is present (`OPENAI_API_KEY` on Vercel and/or localStorage `openai_api_key`), the page can still call Chat Completions with Sol (`gpt-5.6-sol`) for a short title. That title is not a tag chip unless it is already a catalog label.
 
 ## Tag gate
 
-The page shows tag chrome only when the top score clears a fixed bar and leads the runner-up by a fixed margin. The numbers are `TAG_TOP` **0.54**, `TAG_MARGIN` **0.12**, and `TAG_AUTO` **0.66** in `theme-offer.js`. One vocab hit scores 0.54. Two hits score 0.66. These are not a relatedness cutoff, and **0.8 is not a gate**.
+The page shows tag chrome only when the top score clears a fixed bar and leads the runner-up by a fixed margin. The numbers are `TAG_TOP` **0.54**, `TAG_MARGIN` **0.12**, and `TAG_AUTO` **0.66** in `theme-offer.js`. These are not a relatedness cutoff, and **0.8 is not a gate**.
 
 | Outcome | When | What you see |
 | --- | --- | --- |
 | Quiet | Top score is below 0.54, or the runner-up is also below 0.54 while the margin is under 0.12 | No tag chips and no question. The gate line still names the thresholds. |
-| Ask | Both the top score and the runner-up are at least 0.54, and the margin is under 0.12 | The existing parent or drink question. A weak tie, including a score near 0.13, stays quiet. |
+| Ask | Both the top score and the runner-up are at least 0.54, and the margin is under 0.12 | A parent question between the two leading catalog scores. A weak tie, including a score near 0.13, stays quiet. |
 | Ready | Top score is at least 0.54 and under 0.66, and the margin is at least 0.12 | Matching parent and child chips, plus **적용**. Nothing is written until you apply. |
 | Auto | Top score is at least 0.66 and the margin is at least 0.12 | The leading tag is applied. **되돌리기** restores the previous tag. The line above the chips shows `이전 … → …`. |
 
@@ -34,9 +34,7 @@ Several children under the winning parent stay on the row. The gate does not kee
 
 The chrome follows that outcome. Quiet, ask, ready, and auto are different blocks. The pattern is generative UI from a Jev outcome ([note](https://x.com/tenkoh88/status/2101812964387151878), [writeup](https://zenn.dev/foxtail88/articles/jev-generative-ui)) and a choice gate that stays quiet under the bar ([choice gate](https://x.com/ddebowczyk/status/2100655022149165111), [low confidence halted](https://x.com/fange151818/status/2101845479697031578), [typesafe as a judge](https://github.com/E-FL/typesafe-as-a-judge), [choice note](https://x.com/leejpjack/status/2102052263749472262)).
 
-With a TypeSafe key the scores come from live Jev. With no key the same thresholds run on the keyword baseline.
-
-With no Jev key, theme match uses the labeled keyword / vocab baseline (`method: heuristic`).
+Write-time tag scores come from live TypeSafe Jev. The theme request asks Noul once per closed parent and child label. `classifyChunkTags` maps those judged scores onto the catalog. It does not score `String.includes` keyword hits. A memo such as 「어벤저스 보기」 stays at top 0 only when Jev is missing, fails, or returns no catalog label above the bar. A usable catalog Noul score is the gate score. With no key, or when the live call fails, the tag gate stays quiet. It does not invent a keyword confidence. Find related still uses the keyword baseline when there is no key. Chip labels stay on the closed catalog. A custom tag is still something you type.
 
 ## Accordion fallback
 
