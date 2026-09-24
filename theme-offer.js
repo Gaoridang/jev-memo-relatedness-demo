@@ -99,6 +99,11 @@ const PARENT_ASK_PROMPT = "어느 쪽으로 둘까요?";
 const TAG_TOP = 0.54;
 const TAG_MARGIN = 0.12;
 const TAG_AUTO = 0.66;
+const INPUT_BELOW = 0.4;
+const CHALLENGER_OVERRIDE = 0.85;
+const CHALLENGER_WINS = 2;
+const DROP_BELOW = 0.3;
+const FORCED_CHANGE_RATIO = 0.3;
 
 function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -278,7 +283,20 @@ function parseTheme(value) {
     const choice = parseChoice(value.choice);
     const offer = parseOffer(value.offer);
     if (offer.kind === "ask") throw new Error("committed theme cannot ask");
-    return { phase: "committed", choice, offer };
+    const theme = { phase: "committed", choice, offer };
+    if (value.forced === true) {
+      theme.forced = true;
+      theme.forcedText = typeof value.forcedText === "string" ? value.forcedText : "";
+    }
+    if (
+      value.challenger &&
+      typeof value.challenger.key === "string" &&
+      Number.isInteger(value.challenger.wins) &&
+      value.challenger.wins > 0
+    ) {
+      theme.challenger = { key: value.challenger.key, wins: value.challenger.wins };
+    }
+    return theme;
   }
   throw new Error("unknown phase");
 }
@@ -431,7 +449,7 @@ function gatePair(top, second) {
   const margin = Number((hi - lo).toFixed(4));
   let disposition = "quiet";
   if (hi >= TAG_TOP && margin >= TAG_MARGIN) disposition = hi >= TAG_AUTO ? "auto" : "ready";
-  else if (hi >= TAG_TOP && lo >= TAG_TOP) disposition = "ask";
+  else if (hi >= TAG_TOP && margin < TAG_MARGIN) disposition = "ask";
   return {
     disposition,
     top: Number(hi.toFixed(4)),
@@ -497,12 +515,222 @@ function decideOffer(input) {
   return classifyChunkTags(input).offer;
 }
 
-function proposeTheme(theme, input) {
-  const current = parseTheme(theme);
-  if (current.phase === "committed") {
-    return committedTheme(current.choice, input && input.chunkText, input && input.judged);
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
   }
-  return openTheme(decideOffer(input));
+  return prev[b.length];
+}
+
+function changedSubstantially(from, to) {
+  const len = Math.max(from.length, to.length, 1);
+  return levenshtein(from, to) > FORCED_CHANGE_RATIO * len;
+}
+
+function choiceScore(choice, judged) {
+  if (!choice || !isLiveJudgment(judged)) return 0;
+  const label = labelOfChoice(choice);
+  let score = 0;
+  for (const theme of judged.themes) {
+    if (!theme || theme.label !== label || typeof theme.score !== "number") continue;
+    if (theme.score > score) score = theme.score;
+  }
+  return score;
+}
+
+function challengerKey(raw) {
+  if (raw.choice) return choiceKey(raw.choice);
+  if (raw.disposition === "ask") return `ask:${raw.topId}:${raw.secondId}`;
+  return `disp:${raw.disposition}`;
+}
+
+function markPromoted(choice, text, judged) {
+  const theme = committedTheme(choice, text, judged);
+  theme.forced = false;
+  theme.forcedText = null;
+  theme.challenger = null;
+  return theme;
+}
+
+function markForced(theme, text) {
+  theme.forced = true;
+  theme.forcedText = normalizeText(text);
+  theme.challenger = null;
+  return theme;
+}
+
+function packDecision(raw, memory, chrome, extra) {
+  const flags = extra || {};
+  return {
+    disposition: raw.disposition,
+    top: raw.top,
+    second: raw.second,
+    margin: raw.margin,
+    topMin: raw.topMin,
+    marginMin: raw.marginMin,
+    autoMin: raw.autoMin,
+    choice: flags.choice === undefined ? raw.choice : flags.choice,
+    forced: flags.forced === true,
+    applied: flags.applied === true,
+    commitEligible: flags.commitEligible === true,
+    memory,
+    chrome,
+  };
+}
+
+function adoptRaw(raw, text, src) {
+  if (raw.disposition === "auto" && raw.choice && !(src && src.held)) {
+    const memory = markPromoted(raw.choice, text, src && src.judged);
+    return packDecision(raw, memory, memory, {
+      forced: false,
+      applied: true,
+      choice: raw.choice,
+      commitEligible: false,
+    });
+  }
+  const chrome = openTheme(raw.offer);
+  const eligible = (raw.disposition === "ready" || raw.disposition === "auto") && !!raw.choice;
+  return packDecision(raw, chrome, chrome, {
+    forced: false,
+    applied: false,
+    choice: raw.choice,
+    commitEligible: eligible,
+  });
+}
+
+function decideCommitted(current, raw, text, src) {
+  const currentP = choiceScore(current.choice, src && src.judged);
+  const topConf = raw.top;
+  const same = raw.choice && choiceKey(raw.choice) === choiceKey(current.choice);
+  if (same && (raw.disposition === "auto" || raw.disposition === "ready")) {
+    const memory = { phase: current.phase, choice: current.choice, offer: current.offer, forced: false, forcedText: null, challenger: null };
+    return packDecision(raw, memory, memory, {
+      forced: false,
+      applied: true,
+      choice: current.choice,
+      commitEligible: false,
+    });
+  }
+  if (topConf >= CHALLENGER_OVERRIDE) return adoptRaw(raw, text, src);
+  if (raw.disposition === "quiet") {
+    if (currentP < DROP_BELOW) {
+      const memory = openTheme(raw.offer);
+      return packDecision(raw, memory, memory, {
+        forced: false,
+        applied: false,
+        choice: null,
+        commitEligible: false,
+      });
+    }
+    const memory = {
+      phase: current.phase,
+      choice: current.choice,
+      offer: current.offer,
+      forced: false,
+      forcedText: null,
+      challenger: null,
+    };
+    const chrome = openTheme(raw.offer);
+    return packDecision(raw, memory, chrome, {
+      forced: false,
+      applied: false,
+      choice: null,
+      commitEligible: false,
+    });
+  }
+  const key = challengerKey(raw);
+  const wins = current.challenger && current.challenger.key === key ? current.challenger.wins + 1 : 1;
+  if (wins >= CHALLENGER_WINS && topConf >= INPUT_BELOW) return adoptRaw(raw, text, src);
+  const memory = {
+    phase: current.phase,
+    choice: current.choice,
+    offer: current.offer,
+    forced: false,
+    forcedText: null,
+    challenger: { key, wins },
+  };
+  if (raw.disposition === "ask") {
+    const chrome = openTheme(raw.offer);
+    return packDecision(raw, memory, chrome, {
+      forced: false,
+      applied: false,
+      choice: null,
+      commitEligible: false,
+    });
+  }
+  return packDecision(raw, memory, memory, {
+    forced: false,
+    applied: true,
+    choice: current.choice,
+    commitEligible: false,
+  });
+}
+
+function decide(theme, input) {
+  const src = input || {};
+  const text = normalizeText(src.chunkText);
+  const raw = classifyChunkTags(src);
+  if (!text) {
+    const memory = initialTheme();
+    return packDecision(raw, memory, memory, {
+      forced: false,
+      applied: false,
+      choice: null,
+      commitEligible: false,
+    });
+  }
+  let current = parseTheme(theme);
+  if (current.phase === "committed" && current.forced) {
+    const from = typeof current.forcedText === "string" ? current.forcedText : text;
+    if (!changedSubstantially(from, text)) {
+      return packDecision(raw, current, current, {
+        forced: true,
+        applied: true,
+        choice: current.choice,
+        commitEligible: false,
+      });
+    }
+    current = {
+      phase: current.phase,
+      choice: current.choice,
+      offer: current.offer,
+      forced: false,
+      forcedText: null,
+      challenger: null,
+    };
+  }
+  if (current.phase === "committed") return decideCommitted(current, raw, text, src);
+  return adoptRaw(raw, text, src);
+}
+
+function captionState(decision) {
+  if (!decision) return "보류";
+  if (decision.forced || decision.applied) return "적용됨";
+  if (decision.disposition === "ask") return "질문";
+  if (decision.disposition === "ready" || decision.disposition === "auto") return "적용 준비";
+  return "보류";
+}
+
+function gateCaption(decision) {
+  const gate = decision || {};
+  const topMin = typeof gate.topMin === "number" ? gate.topMin : TAG_TOP;
+  const marginMin = typeof gate.marginMin === "number" ? gate.marginMin : TAG_MARGIN;
+  const autoMin = typeof gate.autoMin === "number" ? gate.autoMin : TAG_AUTO;
+  const top = typeof gate.top === "number" ? gate.top : 0;
+  const margin = typeof gate.margin === "number" ? gate.margin : 0;
+  return `태그 기준 top ≥ ${topMin.toFixed(2)}, margin ≥ ${marginMin.toFixed(2)}, auto ≥ ${autoMin.toFixed(2)} · 이번 top ${top.toFixed(2)}, margin ${margin.toFixed(2)} · ${captionState(gate)}`;
+}
+
+function proposeTheme(theme, input) {
+  return decide(theme, input).memory;
 }
 
 function offerContains(theme, choice) {
@@ -534,14 +762,14 @@ function offerContains(theme, choice) {
 
 function commitCustom(label, chunkText) {
   const choice = parseChoice({ kind: "custom", label });
-  return committedTheme(choice, chunkText);
+  return markForced(committedTheme(choice, chunkText), chunkText);
 }
 
 function commitPick(theme, pick, chunkText) {
   const current = parseTheme(theme);
   const choice = parseChoice(pick);
   if (!offerContains(current, choice)) throw new Error("pick is outside the offer");
-  return committedTheme(choice, chunkText);
+  return markForced(committedTheme(choice, chunkText), chunkText);
 }
 
 function openParentMenu(theme) {
@@ -712,6 +940,9 @@ const exported = {
   TAG_AUTO,
   gateScores,
   classifyChunkTags,
+  decide,
+  gateCaption,
+  captionState,
   decideOffer,
   quietOffer,
   commitCustom,

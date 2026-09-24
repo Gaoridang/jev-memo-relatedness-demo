@@ -473,17 +473,88 @@ function upsertChunkLog(pad, record, extra) {
   return entry;
 }
 
-function gateCaption(gate, committed) {
-  const topMin = gate && typeof gate.topMin === "number" ? gate.topMin : TAG_TOP;
-  const marginMin = gate && typeof gate.marginMin === "number" ? gate.marginMin : TAG_MARGIN;
-  const autoMin = gate && typeof gate.autoMin === "number" ? gate.autoMin : TAG_AUTO;
-  const top = gate && typeof gate.top === "number" ? gate.top : 0;
-  const margin = gate && typeof gate.margin === "number" ? gate.margin : 0;
-  let state = "보류";
-  if (committed) state = "적용됨";
-  else if (gate && gate.disposition === "ask") state = "질문";
-  else if (gate && (gate.disposition === "ready" || gate.disposition === "auto")) state = "적용 준비";
-  return `태그 기준 top ≥ ${topMin.toFixed(2)}, margin ≥ ${marginMin.toFixed(2)}, auto ≥ ${autoMin.toFixed(2)} · 이번 top ${top.toFixed(2)}, margin ${margin.toFixed(2)} · ${state}`;
+function rowDecision(record) {
+  const gate = record && record.tagGate;
+  const memory = record && record.theme;
+  if (!gate || !gate.disposition) {
+    const label = choiceLabel(memory);
+    return {
+      disposition: label ? "auto" : "quiet",
+      top: 0,
+      second: 0,
+      margin: 0,
+      topMin: TAG_TOP,
+      marginMin: TAG_MARGIN,
+      autoMin: TAG_AUTO,
+      forced: false,
+      applied: Boolean(label),
+      choice: null,
+      chrome: memory,
+      memory,
+      commitEligible: false,
+    };
+  }
+  return {
+    disposition: gate.disposition,
+    top: typeof gate.top === "number" ? gate.top : 0,
+    second: typeof gate.second === "number" ? gate.second : 0,
+    margin: typeof gate.margin === "number" ? gate.margin : 0,
+    topMin: typeof gate.topMin === "number" ? gate.topMin : TAG_TOP,
+    marginMin: typeof gate.marginMin === "number" ? gate.marginMin : TAG_MARGIN,
+    autoMin: typeof gate.autoMin === "number" ? gate.autoMin : TAG_AUTO,
+    forced: gate.forced === true,
+    applied: gate.applied === true,
+    choice: gate.choice || null,
+    chrome: record.chromeTheme || memory,
+    memory,
+    commitEligible: gate.commitEligible === true,
+  };
+}
+
+function stampDecision(record, decision) {
+  record.theme = decision.memory;
+  record.chromeTheme = decision.chrome;
+  record.tagGate = {
+    disposition: decision.disposition,
+    top: decision.top,
+    second: decision.second,
+    margin: decision.margin,
+    topMin: decision.topMin,
+    marginMin: decision.marginMin,
+    autoMin: decision.autoMin,
+    choice: decision.choice,
+    forced: decision.forced === true,
+    applied: decision.applied === true,
+    commitEligible: decision.commitEligible === true,
+  };
+  record.stickyLabel = decision.forced || decision.applied ? choiceLabel(decision.memory) : null;
+}
+
+function stampForcedTheme(record) {
+  record.chromeTheme = record.theme;
+  const gate = record.tagGate || {
+    disposition: "ready",
+    top: 0,
+    second: 0,
+    margin: 0,
+    topMin: TAG_TOP,
+    marginMin: TAG_MARGIN,
+    autoMin: TAG_AUTO,
+  };
+  record.tagGate = {
+    disposition: gate.disposition,
+    top: typeof gate.top === "number" ? gate.top : 0,
+    second: typeof gate.second === "number" ? gate.second : 0,
+    margin: typeof gate.margin === "number" ? gate.margin : 0,
+    topMin: typeof gate.topMin === "number" ? gate.topMin : TAG_TOP,
+    marginMin: typeof gate.marginMin === "number" ? gate.marginMin : TAG_MARGIN,
+    autoMin: typeof gate.autoMin === "number" ? gate.autoMin : TAG_AUTO,
+    choice: record.theme.choice,
+    forced: true,
+    applied: true,
+    commitEligible: false,
+  };
+  record.stickyLabel = choiceLabel(record.theme);
 }
 
 function renderChunkRows() {
@@ -498,8 +569,9 @@ function renderChunkRows() {
   }
   for (const row of rows) {
     if (!row.record.theme) row.record.theme = themeFromLegacy(row.record);
-    const view = themeView(row.record.theme);
-    const committed = choiceLabel(row.record.theme);
+    const decision = rowDecision(row.record);
+    const view = themeView(decision.chrome || row.record.theme);
+    const committed = decision.forced || decision.applied ? choiceLabel(decision.memory || row.record.theme) : null;
     const article = document.createElement("article");
     article.className = "chunk-row";
     if (row.block.id === loc.active.id) article.classList.add("active");
@@ -515,13 +587,12 @@ function renderChunkRows() {
       renderChunkRows();
     };
     article.appendChild(excerpt);
-    const gate = row.record.tagGate || null;
     const split = row.record.split || {};
     const nudge = split.kind === "nudge" && split.shouldNotSplit !== true;
-    const holdSuggestions = view.kind === "quiet" || (gate && gate.disposition === "quiet" && !committed);
+    const holdSuggestions = view.kind === "quiet";
     const gateLine = document.createElement("p");
     gateLine.className = "gate-label";
-    gateLine.textContent = gateCaption(gate, committed);
+    gateLine.textContent = gateCaption(decision);
     article.appendChild(gateLine);
     if (!holdSuggestions && view.kind === "ask" && view.prompt) {
       const prompt = document.createElement("p");
@@ -578,7 +649,7 @@ function renderChunkRows() {
       parentBtn.onclick = () => openChunkParents(row.key);
       chips.appendChild(parentBtn);
     }
-    if (!committed && gate && (gate.disposition === "ready" || gate.disposition === "auto") && gate.choice) {
+    if (decision.commitEligible) {
       const applyBtn = document.createElement("button");
       applyBtn.type = "button";
       applyBtn.className = "chip primary";
@@ -688,7 +759,8 @@ function onChunkChip(key, chip) {
   if (!record || !chip || !chip.choice) return;
   if (!record.theme) record.theme = themeFromLegacy(record);
   const previousLabel = choiceLabel(record.theme);
-  record.theme = commitPick(record.theme, chip.choice, record.text);
+  record.theme = commitPick(record.chromeTheme || record.theme, chip.choice, record.text);
+  stampForcedTheme(record);
   const label = choiceLabel(record.theme);
   if (previousLabel !== label) {
     record.suggestion = { action: "adjust", label, previous: previousLabel };
@@ -707,16 +779,16 @@ function applyReadyTag(key) {
   const pad = activePad();
   const record = chunkRecord(key);
   const gate = record && record.tagGate;
-  if (!record || !gate || gate.disposition !== "ready" || !gate.choice) return;
+  if (!record || !gate || (gate.disposition !== "ready" && gate.disposition !== "auto") || !gate.choice) return;
   if (!record.theme) record.theme = themeFromLegacy(record);
   const previous = choiceLabel(record.theme);
   record.tagUndo = {
     theme: JSON.parse(JSON.stringify(record.theme)),
     stickyLabel: record.stickyLabel || null,
   };
-  record.theme = commitPick(record.theme, gate.choice, record.text);
+  record.theme = commitPick(record.chromeTheme || record.theme, gate.choice, record.text);
+  stampForcedTheme(record);
   const label = choiceLabel(record.theme);
-  record.stickyLabel = label;
   record.suggestion = { action: "accept", label, previous };
   if (label && gate.choice.kind !== "fallback") {
     pad.assignedThemeLabel = label;
@@ -733,7 +805,28 @@ function undoTag(key) {
   if (!record || !record.tagUndo) return;
   const applied = choiceLabel(record.theme);
   record.theme = record.tagUndo.theme || initialTheme();
+  record.chromeTheme = record.theme;
   record.stickyLabel = record.tagUndo.stickyLabel || choiceLabel(record.theme);
+  if (record.tagGate) {
+    record.tagGate = {
+      disposition: record.tagGate.disposition,
+      top: record.tagGate.top,
+      second: record.tagGate.second,
+      margin: record.tagGate.margin,
+      topMin: record.tagGate.topMin,
+      marginMin: record.tagGate.marginMin,
+      autoMin: record.tagGate.autoMin,
+      choice: record.tagGate.choice,
+      forced: false,
+      applied:
+        record.theme.phase === "committed" &&
+        (record.tagGate.disposition === "ready" || record.tagGate.disposition === "auto"),
+      commitEligible:
+        record.theme.phase !== "committed" &&
+        (record.tagGate.disposition === "ready" || record.tagGate.disposition === "auto") &&
+        !!record.tagGate.choice,
+    };
+  }
   record.tagUndo = null;
   record.tagHoldText = normalizeText(record.text);
   record.suggestion = { action: "reject", label: applied, previous: record.stickyLabel };
@@ -755,6 +848,7 @@ function addCustomTag(key, raw) {
   } catch (err) {
     return;
   }
+  stampForcedTheme(record);
   record.stickyLabel = choiceLabel(record.theme);
   record.suggestion = { action: "adjust", label: record.stickyLabel, previous };
   record.tagUndo = { theme: before, stickyLabel: previous };
@@ -771,7 +865,13 @@ function openChunkParents(key) {
   if (!record) return;
   if (!record.theme) record.theme = themeFromLegacy(record);
   record.theme = openParentMenu(record.theme);
+  record.chromeTheme = record.theme;
   record.stickyLabel = choiceLabel(record.theme);
+  if (record.tagGate) {
+    record.tagGate.forced = false;
+    record.tagGate.applied = false;
+    record.tagGate.commitEligible = false;
+  }
   upsertChunkLog(pad, record, { blockId: key });
   renderChunkRows();
 }
@@ -786,9 +886,9 @@ function rateChunk(key, chip, verdict) {
   record.ratings[chip.key] = { verdict, note: prev.note || "", label: chip.label || "" };
   if (verdict === "yes" && chip.choice) {
     if (!record.theme) record.theme = themeFromLegacy(record);
-    record.theme = commitPick(record.theme, chip.choice, record.text);
+    record.theme = commitPick(record.chromeTheme || record.theme, chip.choice, record.text);
+    stampForcedTheme(record);
     const label = choiceLabel(record.theme);
-    record.stickyLabel = label;
     if (label && chip.choice.kind !== "fallback") {
       pad.assignedThemeLabel = label;
       rememberSessionTheme(label, record.text);
@@ -1160,48 +1260,32 @@ async function runThemePropose() {
         shouldNotSplit: textUnchanged ? row.record.split.shouldNotSplit : null,
       };
       if (!row.record.theme) row.record.theme = themeFromLegacy(row.record);
-      const gate = classifyChunkTags({
-        chunkText: row.block.text,
-        judged,
-        priors,
-        earlierTexts: earlier,
-      });
-      row.record.tagGate = {
-        disposition: gate.disposition,
-        top: gate.top,
-        second: gate.second,
-        margin: gate.margin,
-        topMin: gate.topMin,
-        marginMin: gate.marginMin,
-        autoMin: gate.autoMin,
-        choice: gate.choice,
-      };
       if (row.record.tagHoldText && row.record.tagHoldText !== normalizeText(row.block.text)) {
         row.record.tagHoldText = null;
       }
       const before = JSON.parse(JSON.stringify(row.record.theme));
       const wasCommitted = before.phase === "committed";
-      row.record.theme = proposeTheme(row.record.theme, {
+      const held = row.record.tagHoldText === normalizeText(row.block.text);
+      const decision = decide(row.record.theme, {
         chunkText: row.block.text,
         judged,
         priors,
         earlierTexts: earlier,
+        held,
       });
-      const held = row.record.tagHoldText === normalizeText(row.block.text);
-      if (!wasCommitted && gate.disposition === "auto" && gate.choice && !held) {
+      if (!wasCommitted && decision.memory.phase === "committed") {
         row.record.tagUndo = {
-          theme: JSON.parse(JSON.stringify(row.record.theme)),
+          theme: before,
           stickyLabel: choiceLabel(before),
         };
-        row.record.theme = commitPick(row.record.theme, gate.choice, row.block.text);
         row.record.suggestion = {
           action: null,
-          label: choiceLabel(row.record.theme),
+          label: choiceLabel(decision.memory),
           previous: choiceLabel(before),
           applied: true,
         };
       }
-      row.record.stickyLabel = choiceLabel(row.record.theme);
+      stampDecision(row.record, decision);
       row.record.judgedText = row.block.text;
       showError(judged.error || "");
       upsertChunkLog(pad, row.record, {
