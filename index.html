@@ -177,6 +177,10 @@ button.chip.soft{color:var(--muted-foreground)}
 .chunk-row.active{border-color:#18181b}
 .chunk-excerpt{margin:0;font-size:14px;line-height:1.55;white-space:pre-wrap}
 .chunk-ask,.chunk-heading{margin:10px 0 0;font-size:13px}
+.gate-label{margin:10px 0 0;font-size:12px;color:var(--muted-foreground)}
+.tag-diff{margin:8px 0 0;font-size:13px}
+.custom-tag{display:flex;gap:8px;margin-top:10px}
+.custom-tag input{flex:1}
 .chunk-heading{font-weight:600}
 .chunk-heading.on{color:var(--ok)}
 .theme-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
@@ -271,7 +275,7 @@ details.fallback summary{cursor:pointer;font-weight:600}
   <main class="main">
     <div class="main-inner">
       <h1>메모</h1>
-      <p class="lede">문단을 쓰면 그 아래에 주제가 붙습니다.</p>
+      <p class="lede">문단을 쓰면, 기준을 넘긴 태그만 그 아래에 붙습니다. 기준 아래는 비워 둡니다.</p>
       <div id="padTabs" class="pad-tabs"></div>
       <label for="query">쓰는 중</label>
       <div class="editor-shell">

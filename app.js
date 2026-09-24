@@ -248,6 +248,21 @@ function formatPhraseNames(phrases) {
   return ` · names ${phrases.map((phrase) => phrase.surface).join(", ")}`;
 }
 
+function formatSuggestion(entry) {
+  const suggestion = entry && entry.suggestion;
+  const gate = entry && entry.tagGate;
+  const parts = [];
+  if (gate && gate.disposition) {
+    parts.push(
+      `gate ${gate.disposition} top ${gate.top} margin ${gate.margin} (top ≥ ${gate.topMin}, margin ≥ ${gate.marginMin})`
+    );
+  }
+  if (suggestion) {
+    parts.push(`suggestion ${suggestion.action || "pending"} ${suggestion.label || ""}`);
+  }
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
+}
+
 function formatTagRatings(ratings) {
   const parts = [];
   for (const [key, rating] of Object.entries(ratings || {})) {
@@ -278,7 +293,7 @@ function renderLog() {
           <span>${escapeHtml(entry.ts)}</span>
         </div>
         <p>${escapeHtml(entry.chunk || "")}</p>
-          <div class="muted">confidence ${entry.confidence == null ? "—" : entry.confidence} · chip ${escapeHtml(String(entry.chipChosen))} · split ${escapeHtml(String(entry.splitKind || entry.newMemoNudge))} · shouldNotSplit ${escapeHtml(String(entry.shouldNotSplit))} · pad ${escapeHtml(String(entry.padId))} · ${escapeHtml(String(entry.chunkKey || entry.activeChunkId))}${escapeHtml(formatTagRatings(entry.ratings))}${escapeHtml(formatPhraseNames(entry.phrases))}</div>
+          <div class="muted">confidence ${entry.confidence == null ? "—" : entry.confidence} · chip ${escapeHtml(String(entry.chipChosen))} · split ${escapeHtml(String(entry.splitKind || entry.newMemoNudge))} · shouldNotSplit ${escapeHtml(String(entry.shouldNotSplit))} · pad ${escapeHtml(String(entry.padId))} · ${escapeHtml(String(entry.chunkKey || entry.activeChunkId))}${escapeHtml(formatTagRatings(entry.ratings))}${escapeHtml(formatSuggestion(entry))}${escapeHtml(formatPhraseNames(entry.phrases))}</div>
       `;
     } else {
       const yes = Object.values(entry.ratings || {}).filter((v) => v === "yes").length;
@@ -435,6 +450,8 @@ function upsertChunkLog(pad, record, extra) {
     labelSource: null,
     ratings: record.ratings || {},
     stickyLabel: projected.stickyLabel,
+    tagGate: record.tagGate || null,
+    suggestion: record.suggestion || null,
     splitKind: split.kind || "none",
     legacyWouldNudge: split.legacyWouldNudge,
     falsePositive: split.falsePositive,
@@ -456,6 +473,19 @@ function upsertChunkLog(pad, record, extra) {
   return entry;
 }
 
+function gateCaption(gate, committed) {
+  const topMin = gate && typeof gate.topMin === "number" ? gate.topMin : TAG_TOP;
+  const marginMin = gate && typeof gate.marginMin === "number" ? gate.marginMin : TAG_MARGIN;
+  const autoMin = gate && typeof gate.autoMin === "number" ? gate.autoMin : TAG_AUTO;
+  const top = gate && typeof gate.top === "number" ? gate.top : 0;
+  const margin = gate && typeof gate.margin === "number" ? gate.margin : 0;
+  let state = "보류";
+  if (committed) state = "적용됨";
+  else if (gate && gate.disposition === "ask") state = "질문";
+  else if (gate && (gate.disposition === "ready" || gate.disposition === "auto")) state = "적용 준비";
+  return `태그 기준 top ≥ ${topMin.toFixed(2)}, margin ≥ ${marginMin.toFixed(2)}, auto ≥ ${autoMin.toFixed(2)} · 이번 top ${top.toFixed(2)}, margin ${margin.toFixed(2)} · ${state}`;
+}
+
 function renderChunkRows() {
   const pad = activePad();
   const caret = els.query.selectionStart || 0;
@@ -463,7 +493,7 @@ function renderChunkRows() {
   const rows = projectChunkBoard(pad, pad.text);
   els.chunkRows.innerHTML = "";
   if (!rows.length) {
-    els.chunkRows.innerHTML = '<p class="empty">문단이 생기면 각 문단 아래에 태그 칩이 붙습니다.</p>';
+    els.chunkRows.innerHTML = '<p class="empty">문단이 생기면 기준을 넘긴 태그만 아래에 붙습니다.</p>';
     return;
   }
   for (const row of rows) {
@@ -485,13 +515,21 @@ function renderChunkRows() {
       renderChunkRows();
     };
     article.appendChild(excerpt);
-    if (view.kind === "ask" && view.prompt) {
+    const gate = row.record.tagGate || null;
+    const split = row.record.split || {};
+    const nudge = split.kind === "nudge" && split.shouldNotSplit !== true;
+    const holdSuggestions = view.kind === "quiet" || (gate && gate.disposition === "quiet" && !committed);
+    const gateLine = document.createElement("p");
+    gateLine.className = "gate-label";
+    gateLine.textContent = gateCaption(gate, committed);
+    article.appendChild(gateLine);
+    if (!holdSuggestions && view.kind === "ask" && view.prompt) {
       const prompt = document.createElement("p");
       prompt.className = "chunk-ask";
       prompt.textContent = view.prompt;
       article.appendChild(prompt);
     }
-    if (view.kind === "children" && view.heading) {
+    if (!holdSuggestions && view.kind === "children" && view.heading) {
       const heading = document.createElement("p");
       heading.className = "chunk-heading";
       if (committed && (committed === view.heading || view.highlightedKey === view.headingKey)) {
@@ -500,11 +538,16 @@ function renderChunkRows() {
       heading.textContent = view.heading;
       article.appendChild(heading);
     }
+    if (row.record.tagUndo) {
+      const diff = document.createElement("p");
+      diff.className = "tag-diff";
+      const previous = row.record.tagUndo.stickyLabel || "없음";
+      diff.textContent = `이전 ${previous} → ${committed || "없음"}`;
+      article.appendChild(diff);
+    }
     const chips = document.createElement("div");
     chips.className = "theme-chips";
-    const split = row.record.split || {};
-    const nudge = split.kind === "nudge" && split.shouldNotSplit !== true;
-    const shown = view.chips.slice();
+    const shown = holdSuggestions ? [] : view.chips.slice();
     if (nudge) {
       shown.push({ key: "새메모", label: "새 메모로 열기", kind: "새메모" });
     }
@@ -527,7 +570,7 @@ function renderChunkRows() {
       };
       chips.appendChild(btn);
     }
-    if (view.canOpenParentMenu) {
+    if (!holdSuggestions && view.canOpenParentMenu) {
       const parentBtn = document.createElement("button");
       parentBtn.type = "button";
       parentBtn.className = "chip ghost";
@@ -535,8 +578,24 @@ function renderChunkRows() {
       parentBtn.onclick = () => openChunkParents(row.key);
       chips.appendChild(parentBtn);
     }
-    article.appendChild(chips);
-    for (const chip of view.chips) {
+    if (!committed && gate && (gate.disposition === "ready" || gate.disposition === "auto") && gate.choice) {
+      const applyBtn = document.createElement("button");
+      applyBtn.type = "button";
+      applyBtn.className = "chip primary";
+      applyBtn.textContent = "적용";
+      applyBtn.onclick = () => applyReadyTag(row.key);
+      chips.appendChild(applyBtn);
+    }
+    if (row.record.tagUndo) {
+      const undoBtn = document.createElement("button");
+      undoBtn.type = "button";
+      undoBtn.className = "chip ghost";
+      undoBtn.textContent = "되돌리기";
+      undoBtn.onclick = () => undoTag(row.key);
+      chips.appendChild(undoBtn);
+    }
+    if (shown.length || chips.childNodes.length) article.appendChild(chips);
+    if (!holdSuggestions) for (const chip of view.chips) {
       const rating = (row.record.ratings && row.record.ratings[chip.key]) || {};
       const rate = document.createElement("div");
       rate.className = "rate";
@@ -564,6 +623,24 @@ function renderChunkRows() {
       rate.appendChild(note);
       article.appendChild(rate);
     }
+    const custom = document.createElement("form");
+    custom.className = "custom-tag";
+    const customInput = document.createElement("input");
+    customInput.type = "text";
+    customInput.maxLength = 24;
+    customInput.placeholder = "직접 태그";
+    customInput.setAttribute("aria-label", "직접 태그");
+    const customBtn = document.createElement("button");
+    customBtn.type = "submit";
+    customBtn.className = "ghost";
+    customBtn.textContent = "추가";
+    custom.appendChild(customInput);
+    custom.appendChild(customBtn);
+    custom.onsubmit = (event) => {
+      event.preventDefault();
+      addCustomTag(row.key, customInput.value);
+    };
+    article.appendChild(custom);
     if (nudge) {
       const bar = document.createElement("div");
       bar.className = "nudge-bar";
@@ -610,14 +687,80 @@ function onChunkChip(key, chip) {
   const record = chunkRecord(key);
   if (!record || !chip || !chip.choice) return;
   if (!record.theme) record.theme = themeFromLegacy(record);
+  const previousLabel = choiceLabel(record.theme);
   record.theme = commitPick(record.theme, chip.choice, record.text);
   const label = choiceLabel(record.theme);
+  if (previousLabel !== label) {
+    record.suggestion = { action: "adjust", label, previous: previousLabel };
+  }
   record.stickyLabel = label;
   if (label && chip.choice.kind !== "fallback") {
     pad.assignedThemeLabel = label;
     rememberSessionTheme(label, record.text);
   }
   upsertChunkLog(pad, record, { chipChosen: chip.label, blockId: key });
+  renderPads();
+  renderChunkRows();
+}
+
+function applyReadyTag(key) {
+  const pad = activePad();
+  const record = chunkRecord(key);
+  const gate = record && record.tagGate;
+  if (!record || !gate || gate.disposition !== "ready" || !gate.choice) return;
+  if (!record.theme) record.theme = themeFromLegacy(record);
+  const previous = choiceLabel(record.theme);
+  record.tagUndo = {
+    theme: JSON.parse(JSON.stringify(record.theme)),
+    stickyLabel: record.stickyLabel || null,
+  };
+  record.theme = commitPick(record.theme, gate.choice, record.text);
+  const label = choiceLabel(record.theme);
+  record.stickyLabel = label;
+  record.suggestion = { action: "accept", label, previous };
+  if (label && gate.choice.kind !== "fallback") {
+    pad.assignedThemeLabel = label;
+    rememberSessionTheme(label, record.text);
+  }
+  upsertChunkLog(pad, record, { chipChosen: label, blockId: key });
+  renderPads();
+  renderChunkRows();
+}
+
+function undoTag(key) {
+  const pad = activePad();
+  const record = chunkRecord(key);
+  if (!record || !record.tagUndo) return;
+  const applied = choiceLabel(record.theme);
+  record.theme = record.tagUndo.theme || initialTheme();
+  record.stickyLabel = record.tagUndo.stickyLabel || choiceLabel(record.theme);
+  record.tagUndo = null;
+  record.tagHoldText = normalizeText(record.text);
+  record.suggestion = { action: "reject", label: applied, previous: record.stickyLabel };
+  upsertChunkLog(pad, record, { chipChosen: record.stickyLabel, blockId: key });
+  renderPads();
+  renderChunkRows();
+}
+
+function addCustomTag(key, raw) {
+  const pad = activePad();
+  const record = chunkRecord(key);
+  if (!record) return;
+  const label = normalizeText(raw);
+  if (!label || isChunkPrefixLabel(label, record.text)) return;
+  const previous = choiceLabel(record.theme);
+  const before = JSON.parse(JSON.stringify(record.theme || initialTheme()));
+  try {
+    record.theme = commitCustom(label, record.text);
+  } catch (err) {
+    return;
+  }
+  record.stickyLabel = choiceLabel(record.theme);
+  record.suggestion = { action: "adjust", label: record.stickyLabel, previous };
+  record.tagUndo = { theme: before, stickyLabel: previous };
+  pad.assignedThemeLabel = record.stickyLabel;
+  rememberSessionTheme(record.stickyLabel, record.text);
+  upsertChunkLog(pad, record, { chipChosen: record.stickyLabel, blockId: key });
   renderPads();
   renderChunkRows();
 }
@@ -1017,12 +1160,47 @@ async function runThemePropose() {
         shouldNotSplit: textUnchanged ? row.record.split.shouldNotSplit : null,
       };
       if (!row.record.theme) row.record.theme = themeFromLegacy(row.record);
+      const gate = classifyChunkTags({
+        chunkText: row.block.text,
+        judged,
+        priors,
+        earlierTexts: earlier,
+      });
+      row.record.tagGate = {
+        disposition: gate.disposition,
+        top: gate.top,
+        second: gate.second,
+        margin: gate.margin,
+        topMin: gate.topMin,
+        marginMin: gate.marginMin,
+        autoMin: gate.autoMin,
+        choice: gate.choice,
+      };
+      if (row.record.tagHoldText && row.record.tagHoldText !== normalizeText(row.block.text)) {
+        row.record.tagHoldText = null;
+      }
+      const before = JSON.parse(JSON.stringify(row.record.theme));
+      const wasCommitted = before.phase === "committed";
       row.record.theme = proposeTheme(row.record.theme, {
         chunkText: row.block.text,
         judged,
         priors,
         earlierTexts: earlier,
       });
+      const held = row.record.tagHoldText === normalizeText(row.block.text);
+      if (!wasCommitted && gate.disposition === "auto" && gate.choice && !held) {
+        row.record.tagUndo = {
+          theme: JSON.parse(JSON.stringify(row.record.theme)),
+          stickyLabel: choiceLabel(before),
+        };
+        row.record.theme = commitPick(row.record.theme, gate.choice, row.block.text);
+        row.record.suggestion = {
+          action: null,
+          label: choiceLabel(row.record.theme),
+          previous: choiceLabel(before),
+          applied: true,
+        };
+      }
       row.record.stickyLabel = choiceLabel(row.record.theme);
       row.record.judgedText = row.block.text;
       showError(judged.error || "");
