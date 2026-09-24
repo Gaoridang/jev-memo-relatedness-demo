@@ -1,8 +1,7 @@
 const {
   SYSTEMONE_URL,
   buildRelatednessRequest,
-  buildThemeChunkRequest,
-} = require("../shared");
+} = require("../relatedness");
 
 function readBody(req) {
   if (req.body && typeof req.body === "object") return { ok: true, body: req.body };
@@ -60,19 +59,6 @@ module.exports = async function handler(req, res) {
     return;
   }
   const body = parsed.body || {};
-  const mode = body.mode === "theme_chunk" ? "theme_chunk" : "relatedness";
-
-  if (mode === "theme_chunk") {
-    const chunk = typeof body.chunk === "string" ? body.chunk : "";
-    if (!chunk.trim()) {
-      res.status(400).json({ error: "chunk is required" });
-      return;
-    }
-    const priorThemes = Array.isArray(body.priorThemes) ? body.priorThemes : [];
-    await proxySystemOne(res, key, buildThemeChunkRequest(chunk, priorThemes));
-    return;
-  }
-
   const query = typeof body.query === "string" ? body.query : "";
   const candidates = Array.isArray(body.candidates) ? body.candidates : [];
   if (!query.trim()) {

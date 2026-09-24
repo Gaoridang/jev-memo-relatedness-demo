@@ -3,9 +3,6 @@
   "functions": {
     "api/jev.js": {
       "maxDuration": 30
-    },
-    "api/llm.js": {
-      "maxDuration": 30
     }
   }
 }

@@ -11,10 +11,12 @@ const {
   parseRelatednessAnswers,
   makeEvalEntry,
   setEvalRating,
+  keepRelatedRuns,
   toEvalJson,
   toEvalJsonl,
   excludeSelf,
-} = require("../shared");
+} = require("../relatedness");
+const { extractPhrases } = require("../phrases");
 
 const fixturePath = path.join(__dirname, "..", "fixtures", "korean-memo-relatedness-30.json");
 const corpus = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
@@ -192,5 +194,56 @@ const liveExport = makeEvalEntry({
 });
 assert.deepEqual(liveExport.ranked[0].phraseHits, []);
 assert.deepEqual(liveExport.ranked[1].phraseHits, []);
+
+const phraseSurfaces = {
+  m02: ["공임나라"],
+  m11: ["경희대"],
+  m32: ["Bookclub", "AWAIT_USER", "Writing Helper", "X Digger"],
+  m33: ["Core ML", "Mac", "Neural Engine", "Vercel", "URL", "README"],
+  m36: ["TypeSafe Jev"],
+  m37: ["금오산", "학생회관", "김자영", "한경국립대", "충남대", "전남대", "김현철", "경북대", "서울과기대", "정송철"],
+  m38: ["HDMI", "박지훈", "박지현", "김수연", "이도윤"],
+  m39: ["Frother", "USB"],
+  m40: ["학생회관", "최유진", "한도겸"],
+};
+for (const memo of corpus.memos) {
+  assert.deepEqual(
+    extractPhrases(memo.text).map((phrase) => phrase.surface),
+    phraseSurfaces[memo.id] || [],
+    memo.id
+  );
+}
+
+const m33 = corpus.memos.find((memo) => memo.id === "m33");
+const m33Phrases = extractPhrases(m33.text);
+const coreMl = m33Phrases.find((phrase) => phrase.surface === "Core ML");
+assert.deepEqual(
+  { surface: coreMl.surface, key: coreMl.key, kind: coreMl.kind },
+  { surface: "Core ML", key: "core ml", kind: "latin" }
+);
+assert.equal(coreMl.end - coreMl.start, 7);
+assert.equal(m33Phrases.some((phrase) => phrase.surface === "Day0"), false);
+assert.equal(m33Phrases.some((phrase) => phrase.surface === "ML"), false);
+
+const m37Surfaces = extractPhrases(corpus.memos.find((memo) => memo.id === "m37").text).map(
+  (phrase) => phrase.surface
+);
+assert.equal(m37Surfaces.includes("G437"), false);
+assert.equal(m37Surfaces.includes("신청자"), false);
+assert.equal(m37Surfaces.includes("이슈가"), false);
+assert.equal(m37Surfaces.includes("이름표"), false);
+
+const keptOnce = keepRelatedRuns([
+  { kind: "related_run", id: "a" },
+  { id: "b" },
+  { kind: "theme_chunk", id: "c" },
+]);
+assert.deepEqual(keptOnce, [
+  { kind: "related_run", id: "a" },
+  { id: "b" },
+]);
+assert.deepEqual(keepRelatedRuns(keptOnce), keptOnce);
+
+assert.equal(require("../relatedness").buildThemeChunkRequest, undefined);
 
 console.log("relatedness.test.cjs passed");
