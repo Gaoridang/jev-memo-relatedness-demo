@@ -261,6 +261,170 @@ const quietLog = projectThemeLog({
 });
 assert.deepEqual(quietLog.proposals, []);
 
+const marginShort = require("../theme-offer").gateScores([0.63, 0.52]);
+assert.equal(marginShort.disposition, "ask");
+assert.equal(marginShort.top, 0.63);
+assert.equal(marginShort.second, 0.52);
+assert.equal(marginShort.margin, 0.11);
+
+const marginReady = require("../theme-offer").gateScores([0.63, 0.51]);
+assert.equal(marginReady.margin, 0.12);
+assert.equal(marginReady.disposition, "ready");
+
+const parentAsk = classifyChunkTags(
+  input("다음주 주말 일정", {
+    judged: liveThemes([
+      { label: "행사·협의", score: 0.63 },
+      { label: "업무", score: 0.52 },
+    ]),
+  })
+);
+assert.equal(parentAsk.disposition, "ask");
+assert.equal(parentAsk.offer.kind, "ask");
+
+const { decide, gateCaption, committedTheme } = require("../theme-offer");
+
+const promoted = decide(
+  initialTheme(),
+  input("오늘 세탁기 돌리고 건조기까지.", {
+    judged: liveThemes([{ label: "집안일", score: 0.8 }, { label: "업무", score: 0.1 }]),
+  })
+);
+assert.equal(promoted.disposition, "auto");
+assert.equal(promoted.forced, false);
+assert.equal(promoted.applied, true);
+assert.equal(promoted.memory.phase, "committed");
+assert.equal(choiceLabel(promoted.memory), "집안일");
+assert.equal(
+  gateCaption(promoted),
+  "태그 기준 top ≥ 0.54, margin ≥ 0.12, auto ≥ 0.66 · 이번 top 0.80, margin 0.70 · 적용됨"
+);
+
+const liveAsk = input("다음주 주말 일정", {
+  judged: liveThemes([
+    { label: "행사·협의", score: 0.63 },
+    { label: "업무", score: 0.52 },
+  ]),
+});
+const askTick = decide(promoted.memory, liveAsk);
+assert.equal(askTick.disposition, "ask");
+assert.equal(askTick.forced, false);
+assert.equal(askTick.applied, false);
+assert.equal(
+  gateCaption(askTick),
+  "태그 기준 top ≥ 0.54, margin ≥ 0.12, auto ≥ 0.66 · 이번 top 0.63, margin 0.11 · 질문"
+);
+assert.equal(themeView(askTick.chrome).kind, "ask");
+assert.equal(askTick.commitEligible, false);
+
+const askTickAgain = decide(askTick.memory, liveAsk);
+assert.equal(askTickAgain.disposition, "ask");
+assert.equal(askTickAgain.memory.phase, "open");
+assert.equal(themeView(askTickAgain.chrome).kind, "ask");
+assert.equal(
+  gateCaption(askTickAgain),
+  "태그 기준 top ≥ 0.54, margin ≥ 0.12, auto ≥ 0.66 · 이번 top 0.63, margin 0.11 · 질문"
+);
+
+const quietHold = decide(
+  promoted.memory,
+  input("오늘 세탁기", {
+    judged: liveThemes([{ label: "집안일", score: 0.35 }]),
+  })
+);
+assert.equal(quietHold.disposition, "quiet");
+assert.equal(quietHold.applied, false);
+assert.equal(quietHold.memory.phase, "committed");
+assert.equal(choiceLabel(quietHold.memory), "집안일");
+assert.equal(
+  gateCaption(quietHold),
+  "태그 기준 top ≥ 0.54, margin ≥ 0.12, auto ≥ 0.66 · 이번 top 0.35, margin 0.35 · 보류"
+);
+assert.equal(themeView(quietHold.chrome).kind, "quiet");
+
+const quietDrop = decide(
+  promoted.memory,
+  input("오늘 세탁기", {
+    judged: liveThemes([{ label: "집안일", score: 0.1 }]),
+  })
+);
+assert.equal(quietDrop.disposition, "quiet");
+assert.equal(quietDrop.memory.phase, "open");
+assert.equal(
+  gateCaption(quietDrop),
+  "태그 기준 top ≥ 0.54, margin ≥ 0.12, auto ≥ 0.66 · 이번 top 0.10, margin 0.10 · 보류"
+);
+
+const blip = decide(
+  promoted.memory,
+  input("빨래하고 커피", {
+    judged: liveThemes([
+      { label: "카페", score: 0.7 },
+      { label: "집안일", score: 0.2 },
+    ]),
+  })
+);
+assert.equal(choiceLabel(blip.memory), "집안일");
+assert.equal(blip.applied, true);
+assert.equal(gateCaption(blip).endsWith("· 적용됨"), true);
+const flipped = decide(
+  blip.memory,
+  input("빨래하고 커피를", {
+    judged: liveThemes([
+      { label: "카페", score: 0.7 },
+      { label: "집안일", score: 0.2 },
+    ]),
+  })
+);
+assert.equal(choiceLabel(flipped.memory), "카페");
+assert.equal(flipped.memory.phase, "committed");
+assert.equal(flipped.forced, false);
+
+const override = decide(
+  promoted.memory,
+  input("스타벅스", {
+    judged: liveThemes([
+      { label: "카페", score: 0.9 },
+      { label: "집안일", score: 0.1 },
+    ]),
+  })
+);
+assert.equal(choiceLabel(override.memory), "카페");
+assert.equal(override.disposition, "auto");
+assert.equal(override.forced, false);
+
+const forcedPick = commitPick(
+  openThemeFrom(fallbackOffer()),
+  { kind: "fallback", label: "없음" },
+  "다음주 주말 일정"
+);
+const forcedAsk = decide(forcedPick, liveAsk);
+assert.equal(forcedAsk.forced, true);
+assert.equal(forcedAsk.disposition, "ask");
+assert.equal(choiceLabel(forcedAsk.memory), "없음");
+assert.equal(themeView(forcedAsk.chrome).kind, "fallback");
+assert.equal(
+  gateCaption(forcedAsk),
+  "태그 기준 top ≥ 0.54, margin ≥ 0.12, auto ≥ 0.66 · 이번 top 0.63, margin 0.11 · 적용됨"
+);
+assert.equal(forcedAsk.commitEligible, false);
+
+const released = decide(
+  forcedPick,
+  input("completely different memo about cafes", {
+    judged: liveThemes([{ label: "카페", score: 0.9 }, { label: "업무", score: 0.1 }]),
+  })
+);
+assert.equal(released.forced, false);
+assert.equal(choiceLabel(released.memory), "카페");
+
+const bare = committedTheme({ kind: "child", parentId: "life", label: "집안일" }, "빨래");
+const dropped = proposeTheme(
+  bare,
+  input("빨래", { judged: liveThemes([{ label: "집안일", score: 0.1 }]) })
+);
+assert.equal(dropped.phase, "open");
+
 function openThemeFrom(offer) {
   return require("../theme-offer").openTheme(offer);
 }
