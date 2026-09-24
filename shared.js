@@ -651,20 +651,29 @@ function parseThemeChunkAnswers(payload, priorThemes, chunk) {
   };
 }
 
+function readGateScores() {
+  if (typeof gateScores === "function") return gateScores;
+  if (typeof module !== "undefined" && module.exports) return require("./theme-offer").gateScores;
+  throw new Error("tag gate missing");
+}
+
 function buildThemeChips(result) {
   const chips = [];
   const seen = new Set();
   const chunk = result && typeof result.chunkText === "string" ? result.chunkText : "";
+  const scored = [];
   for (const theme of (result && result.themes) || []) {
     if (!theme.label || seen.has(theme.label)) continue;
     const label = chunk ? safeThemeLabel(theme.label, chunk) : normalizeText(theme.label);
     if (!label || label === "기타" || label === "없음") continue;
     seen.add(label);
-    chips.push({ id: theme.id, label, kind: "theme", score: theme.score });
+    scored.push({ id: theme.id, label, kind: "theme", score: theme.score });
   }
-  if (result && result.lowConfidence) {
-    chips.push({ id: "기타", label: "기타", kind: "기타", score: null });
-    chips.push({ id: "없음", label: "없음", kind: "없음", score: null });
+  const gate = readGateScores()(scored.map((chip) => (typeof chip.score === "number" ? chip.score : 0)));
+  if (gate.disposition !== "quiet") {
+    for (const chip of scored) {
+      if (typeof chip.score === "number" && chip.score >= gate.topMin) chips.push(chip);
+    }
   }
   if (result && result.drift) {
     chips.push({ id: "새메모", label: "새 메모로 열기", kind: "새메모", score: null });
@@ -826,6 +835,8 @@ function makeThemeChunkEvalEntry({
   legacyWouldNudge,
   falsePositive,
   shouldNotSplit,
+  tagGate,
+  suggestion,
 }) {
   const chunkText = String(chunk || "");
   return {
@@ -858,11 +869,13 @@ function makeThemeChunkEvalEntry({
     falsePositive: Boolean(falsePositive),
     shouldNotSplit: shouldNotSplit === true ? true : null,
     phrases: scanPhrases(chunkText),
+    tagGate: tagGate && typeof tagGate === "object" ? tagGate : null,
+    suggestion: suggestion && typeof suggestion === "object" ? suggestion : null,
   };
 }
 
 function isChoiceId(key) {
-  return typeof key === "string" && /^(parent|child|fallback):/.test(key);
+  return typeof key === "string" && /^(parent|child|fallback|custom):/.test(key);
 }
 
 function canonicalRatings(ratings) {
@@ -950,6 +963,8 @@ function openThemeChunkEntry(entries, fields, touch) {
   if (opts.touchModel) entry.model = fields.model;
   if (fields.shouldNotSplit === true) entry.shouldNotSplit = true;
   if (opts.newMemoNudge === "yes" || opts.newMemoNudge === "no") entry.newMemoNudge = opts.newMemoNudge;
+  if (fields.tagGate && typeof fields.tagGate === "object") entry.tagGate = fields.tagGate;
+  if (fields.suggestion && typeof fields.suggestion === "object") entry.suggestion = fields.suggestion;
   return entry;
 }
 

@@ -104,10 +104,7 @@ assert.equal(snack.needsTitle, false);
 const obscure = proposeThemesHeuristic("249150", [], []);
 assert.equal(obscure.needsTitle, true);
 assert.equal(obscure.lowConfidence, true);
-assert.deepEqual(
-  buildThemeChips(obscure).map((c) => c.kind),
-  ["기타", "없음"]
-);
+assert.deepEqual(buildThemeChips(obscure).map((c) => c.kind), []);
 
 const sameTheme = proposeThemesHeuristic(
   "오늘 세탁기 돌리고 건조기까지.",
@@ -142,12 +139,7 @@ assert.ok(oilChips.some((c) => c.kind === "새메모"));
 assert.ok(!oilChips.some((c) => String(c.label).includes("엔진오일")));
 
 const lowChips = buildThemeChips(obscure);
-assert.deepEqual(
-  lowChips.map((c) => c.kind),
-  ["기타", "없음"]
-);
-assert.equal(lowChips[0].label, "기타");
-assert.equal(lowChips[1].label, "없음");
+assert.deepEqual(lowChips, []);
 
 const trueDrift = proposeThemesHeuristic(
   "오늘 팀 미팅에서 로드맵 논의.",
@@ -234,10 +226,7 @@ assert.equal(liveLow.ok, true);
 assert.equal(liveLow.confidence, 0.2);
 assert.equal(liveLow.lowConfidence, true);
 assert.equal(liveLow.themes[0].id, "t1");
-assert.deepEqual(
-  buildThemeChips(liveLow).map((c) => c.kind),
-  ["theme", "기타", "없음"]
-);
+assert.deepEqual(buildThemeChips(liveLow), []);
 
 const missingNew = parseThemeChunkAnswers(
   { answers: { match_t1: { type: "noul", noul: 0.5 }, none_topic: { type: "noul", noul: 0.1 } } },
@@ -642,5 +631,35 @@ assert.equal(phraseLog.length, 1);
 assert.deepEqual(phraseLog[0].phrases, []);
 assert.deepEqual(Object.keys(phraseLog[0].ratings), ["parent:work"]);
 assert.equal(phraseLog[0].ratings["parent:work"].verdict, "yes");
+
+const suggestionLog = [];
+openThemeChunkEntry(suggestionLog, {
+  chunk: "오늘 세탁기 돌리고 건조기까지.",
+  proposals: [{ id: "child:life:집안일", label: "집안일", kind: "child", score: 0.66 }],
+  padId: "p01",
+  chunkKey: "c01",
+  tagGate: { disposition: "auto", top: 0.66, second: 0, margin: 0.66, topMin: 0.54, marginMin: 0.12, autoMin: 0.66 },
+  suggestion: { action: null, label: "집안일", previous: null, applied: true },
+});
+assert.equal(suggestionLog[0].suggestion.action, null);
+assert.equal(suggestionLog[0].suggestion.label, "집안일");
+assert.equal(suggestionLog[0].tagGate.disposition, "auto");
+openThemeChunkEntry(suggestionLog, {
+  chunk: "오늘 세탁기 돌리고 건조기까지.",
+  proposals: [],
+  padId: "p01",
+  chunkKey: "c01",
+  suggestion: { action: "reject", label: "집안일", previous: null },
+});
+assert.equal(suggestionLog.length, 1);
+assert.equal(suggestionLog[0].suggestion.action, "reject");
+openThemeChunkEntry(suggestionLog, {
+  chunk: "스타벅스에서 아메리카노",
+  proposals: [{ id: "child:life:카페", label: "카페", kind: "child", score: 0.54 }],
+  padId: "p01",
+  chunkKey: "c02",
+  suggestion: { action: "accept", label: "카페", previous: null },
+});
+assert.equal(suggestionLog[1].suggestion.action, "accept");
 
 console.log("theme-chunk.test.cjs passed");

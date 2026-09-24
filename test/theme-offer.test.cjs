@@ -8,6 +8,11 @@ const {
   projectThemeLog,
   initialTheme,
   choiceLabel,
+  classifyChunkTags,
+  fallbackOffer,
+  TAG_TOP,
+  TAG_MARGIN,
+  TAG_AUTO,
 } = require("../theme-offer");
 
 function input(chunkText, extra) {
@@ -21,20 +26,20 @@ function input(chunkText, extra) {
 }
 
 const digits = decideOffer(input("249150"));
-assert.equal(digits.kind, "fallback");
+assert.equal(digits.kind, "quiet");
 const digitView = themeView(openThemeFrom(digits));
 assert.deepEqual(
   digitView.chips.map((chip) => chip.label),
-  ["기타", "없음"]
+  []
 );
-assert.equal(digitView.kind, "fallback");
+assert.equal(digitView.kind, "quiet");
 assert.equal(digitView.prompt, null);
 
 const onlyNumber = decideOffer(input("137"));
-assert.equal(onlyNumber.kind, "fallback");
+assert.equal(onlyNumber.kind, "quiet");
 assert.deepEqual(
   themeView(openThemeFrom(onlyNumber)).chips.map((chip) => chip.label),
-  ["기타", "없음"]
+  []
 );
 
 const starbucks = decideOffer(input("스타벅스에서 아메리카노"));
@@ -104,11 +109,52 @@ assert.equal(otherLog.stickyLabel, null);
 assert.equal(otherLog.inventedLabelAfter, null);
 assert.equal(cableLog.inventedLabelAfter, "업무");
 
-const noneTheme = commitPick(openThemeFrom(digits), { kind: "fallback", label: "없음" }, "249150");
+const noneTheme = commitPick(openThemeFrom(fallbackOffer()), { kind: "fallback", label: "없음" }, "249150");
 assert.equal(choiceLabel(noneTheme), "없음");
 const noneLog = projectThemeLog({ theme: noneTheme, ratings: {}, split: { kind: "none" } });
 assert.equal(noneLog.stickyLabel, "없음");
 assert.equal(noneLog.inventedLabelAfter, "없음");
+
+const laundry = classifyChunkTags(input("오늘 세탁기 돌리고 건조기까지."));
+assert.equal(laundry.disposition, "auto");
+assert.equal(laundry.top >= TAG_AUTO, true);
+assert.equal(laundry.margin >= TAG_MARGIN, true);
+assert.equal(laundry.offer.kind, "children");
+assert.equal(laundry.offer.childLabels.includes("집안일"), true);
+
+const siblings = classifyChunkTags(input("빨래하고 점심으로 김밥 먹었다"));
+assert.equal(siblings.disposition === "ready" || siblings.disposition === "auto", true);
+assert.equal(siblings.offer.kind, "children");
+assert.equal(siblings.offer.childLabels.includes("집안일"), true);
+assert.equal(siblings.offer.childLabels.includes("식사"), true);
+
+const oneHit = classifyChunkTags(input("스타벅스에서 아메리카노"));
+assert.equal(oneHit.disposition, "ready");
+assert.equal(oneHit.top >= TAG_TOP, true);
+assert.equal(oneHit.top < TAG_AUTO, true);
+assert.equal(oneHit.offer.kind, "children");
+
+const mixed = classifyChunkTags(input("팀 미팅 끝나고 빨래를 돌렸다"));
+assert.equal(mixed.disposition, "ask");
+assert.equal(mixed.top >= TAG_TOP, true);
+assert.equal(mixed.second >= TAG_TOP, true);
+assert.equal(mixed.margin < TAG_MARGIN, true);
+assert.equal(mixed.offer.kind, "ask");
+
+const halted = classifyChunkTags(
+  input("아무 말", { judged: { themes: [{ label: "카페", score: 0.13 }] } })
+);
+assert.equal(halted.disposition, "quiet");
+assert.equal(halted.offer.kind, "quiet");
+assert.deepEqual(themeView(openThemeFrom(halted.offer)).chips, []);
+assert.equal(halted.top < TAG_TOP, true);
+
+const quietLog = projectThemeLog({
+  theme: openThemeFrom(halted.offer),
+  ratings: {},
+  split: { kind: "none" },
+});
+assert.deepEqual(quietLog.proposals, []);
 
 function openThemeFrom(offer) {
   return require("../theme-offer").openTheme(offer);

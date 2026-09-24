@@ -98,6 +98,9 @@ for (const parentId of PARENT_IDS) {
 const DRINK_WORDS = Object.freeze(["커피", "음료", "술", "소주", "맥주"]);
 const DRINK_ASK_PROMPT = "업무긴데 모호합니다. 어디로 둘까요?";
 const PARENT_ASK_PROMPT = "어느 쪽으로 둘까요?";
+const TAG_TOP = 0.54;
+const TAG_MARGIN = 0.12;
+const TAG_AUTO = 0.66;
 
 function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -144,6 +147,7 @@ function choiceKey(choice) {
   const parsed = parseChoice(choice);
   if (parsed.kind === "parent") return `parent:${parsed.id}`;
   if (parsed.kind === "child") return `child:${parsed.parentId}:${parsed.label}`;
+  if (parsed.kind === "custom") return `custom:${parsed.label}`;
   return `fallback:${parsed.label}`;
 }
 
@@ -169,6 +173,14 @@ function parseChoice(value) {
   if (value.kind === "fallback") {
     if (value.label !== "기타" && value.label !== "없음") throw new Error("fallback label required");
     return { kind: "fallback", label: value.label };
+  }
+  if (value.kind === "custom") {
+    const label = normalizeText(value.label);
+    if (!label || label.length > 24) throw new Error("custom label required");
+    if (isParentLabel(label) || label === "기타" || label === "없음") {
+      throw new Error("custom label is reserved");
+    }
+    return { kind: "custom", label };
   }
   throw new Error("unknown choice");
 }
@@ -222,12 +234,28 @@ function fallbackOffer() {
   return { kind: "fallback" };
 }
 
+function quietOffer() {
+  return { kind: "quiet" };
+}
+
+function parentOneOffer(id) {
+  return { kind: "parent-one", id: assertParentId(id) };
+}
+
+function customOffer(label) {
+  const choice = parseChoice({ kind: "custom", label });
+  return { kind: "custom", label: choice.label };
+}
+
 function parseOffer(value) {
   if (!value || typeof value !== "object") throw new Error("offer required");
   if (value.kind === "parent-menu") return parentMenuOffer(value.order);
+  if (value.kind === "parent-one") return parentOneOffer(value.id);
   if (value.kind === "children") return childrenOffer(value.parentId, value.childLabels);
   if (value.kind === "ask") return askOffer(value.prompt, value.options);
   if (value.kind === "fallback") return fallbackOffer();
+  if (value.kind === "quiet") return quietOffer();
+  if (value.kind === "custom") return customOffer(value.label);
   throw new Error("unknown offer");
 }
 
@@ -236,7 +264,7 @@ function openTheme(offer) {
 }
 
 function initialTheme() {
-  return openTheme(fallbackOffer());
+  return openTheme(quietOffer());
 }
 
 function parseTheme(value) {
@@ -402,6 +430,7 @@ function childrenForChunk(parentId, chunkText) {
 function settleOffer(choice, chunkText) {
   const parsed = parseChoice(choice);
   if (parsed.kind === "fallback") return fallbackOffer();
+  if (parsed.kind === "custom") return customOffer(parsed.label);
   if (parsed.kind === "parent") {
     const labels = childrenForChunk(parsed.id, chunkText);
     if (labels.length) return childrenOffer(parsed.id, labels);
@@ -419,13 +448,92 @@ function committedTheme(choice, chunkText) {
   return { phase: "committed", choice: parsed, offer };
 }
 
-function decideOffer(input) {
+function gateScores(scores) {
+  const ranked = (scores || [])
+    .filter((score) => typeof score === "number" && Number.isFinite(score))
+    .slice()
+    .sort((a, b) => b - a);
+  const top = ranked.length ? ranked[0] : 0;
+  const second = ranked.length > 1 ? ranked[1] : 0;
+  return gatePair(top, second);
+}
+
+function gatePair(top, second) {
+  const hi = typeof top === "number" && Number.isFinite(top) ? top : 0;
+  const lo = typeof second === "number" && Number.isFinite(second) ? second : 0;
+  const margin = Number((hi - lo).toFixed(4));
+  let disposition = "quiet";
+  if (hi >= TAG_TOP && margin >= TAG_MARGIN) disposition = hi >= TAG_AUTO ? "auto" : "ready";
+  else if (hi >= TAG_TOP && lo >= TAG_TOP) disposition = "ask";
+  return {
+    disposition,
+    top: Number(hi.toFixed(4)),
+    second: Number(lo.toFixed(4)),
+    margin,
+    topMin: TAG_TOP,
+    marginMin: TAG_MARGIN,
+    autoMin: TAG_AUTO,
+  };
+}
+
+function applyJudgedParentScores(scores, judged) {
+  const themes = judged && Array.isArray(judged.themes) ? judged.themes : [];
+  for (const theme of themes) {
+    if (!theme || typeof theme.score !== "number") continue;
+    const parent = PARENTS.find((item) => item.label === theme.label);
+    if (parent) scores[parent.id] = Math.max(scores[parent.id], theme.score);
+    for (const parentId of PARENT_IDS) {
+      if (CHILDREN_BY_PARENT[parentId].some((child) => child.label === theme.label)) {
+        scores[parentId] = Math.max(scores[parentId], theme.score);
+      }
+    }
+  }
+}
+
+function offerForWinner(text, buckets, topId, priors) {
+  const best = bestChildHit(buckets);
+  const priorHome = priorParentIds(priors).find(
+    (id) => best && best.parents.includes(id) && id !== best.parentId
+  );
+  const parentId = best && priorHome ? priorHome : topId;
+  const labels = childLabelsInOrder(parentId, buckets.childHits[parentId]);
+  if (best && priorHome && !labels.includes(best.label)) labels.push(best.label);
+  if (parentId === "work" || parentId === "event") {
+    for (const token of tokenChildren(text)) {
+      if (!labels.includes(token)) labels.push(token);
+    }
+  }
+  if (labels.length) return childrenOffer(parentId, labels);
+  return parentOneOffer(parentId);
+}
+
+function leadingChoice(offer, buckets) {
+  if (!offer) return null;
+  if (offer.kind === "parent-one") return { kind: "parent", id: offer.id };
+  if (offer.kind !== "children") return null;
+  let bestLabel = offer.childLabels[0];
+  let bestScore = -1;
+  for (const label of offer.childLabels) {
+    const hits = buckets.childHits[offer.parentId].get(label) || 0;
+    const score = hits ? scoreOf(hits) : 0;
+    if (score > bestScore) {
+      bestScore = score;
+      bestLabel = label;
+    }
+  }
+  return { kind: "child", parentId: offer.parentId, label: bestLabel };
+}
+
+function classifyChunkTags(input) {
   const src = input || {};
   const text = normalizeText(src.chunkText);
-  if (!text || /^\d+$/.test(text)) return fallbackOffer();
+  if (!text || /^\d+$/.test(text)) {
+    return { ...gatePair(0, 0), offer: quietOffer(), choice: null, topId: null, secondId: null };
+  }
   const buckets = keywordBuckets(text);
   const scores = {};
   for (const parentId of PARENT_IDS) scores[parentId] = parentScore(parentId, buckets);
+  applyJudgedParentScores(scores, src.judged);
   const drinks = drinkCount(text);
   if (drinks) {
     const drinkScore = scoreOf(drinks);
@@ -435,36 +543,24 @@ function decideOffer(input) {
   const ranked = rankParents(scores);
   const topId = ranked[0];
   const secondId = ranked[1];
-  const gap = scores[topId] - scores[secondId];
-  const secondClose = scores[secondId] > 0 && gap < 0.12;
-  const drinkGap = Math.abs(scores.work - scores.life);
-  if (drinks && !strongChild(buckets) && scores.work > 0 && scores.life > 0 && drinkGap < 0.12) {
-    return drinkAsk();
+  const gate = gatePair(scores[topId], scores[secondId]);
+  if (gate.disposition === "quiet") {
+    return { ...gate, offer: quietOffer(), choice: null, topId, secondId };
   }
-  const best = bestChildHit(buckets);
-  const priorHome = priorParentIds(src.priors).find((id) => best && best.parents.includes(id) && id !== best.parentId);
-  if (best && priorHome) {
-    const labels = childLabelsInOrder(priorHome, buckets.childHits[priorHome]);
-    if (!labels.includes(best.label)) labels.push(best.label);
-    if (priorHome === "work" || priorHome === "event") {
-      for (const token of tokenChildren(text)) {
-        if (!labels.includes(token)) labels.push(token);
-      }
-    }
-    return childrenOffer(priorHome, labels);
+  if (gate.disposition === "ask") {
+    const drinkGap = Math.abs(scores.work - scores.life);
+    const offer =
+      drinks && !strongChild(buckets) && scores.work >= TAG_TOP && scores.life >= TAG_TOP && drinkGap < TAG_MARGIN
+        ? drinkAsk()
+        : parentAsk(topId, secondId);
+    return { ...gate, offer, choice: null, topId, secondId };
   }
-  const topChildren = childLabelsInOrder(topId, buckets.childHits[topId]);
-  if (topChildren.length > 0 && !secondClose) {
-    const labels = topChildren.slice();
-    if (topId === "work" || topId === "event") {
-      for (const token of tokenChildren(text)) {
-        if (!labels.includes(token)) labels.push(token);
-      }
-    }
-    return childrenOffer(topId, labels);
-  }
-  if (scores[topId] > 0 && scores[secondId] > 0 && gap < 0.12) return parentAsk(topId, secondId);
-  return parentMenuOffer(ranked);
+  const offer = offerForWinner(text, buckets, topId, src.priors);
+  return { ...gate, offer, choice: leadingChoice(offer, buckets), topId, secondId };
+}
+
+function decideOffer(input) {
+  return classifyChunkTags(input).offer;
 }
 
 function proposeTheme(theme, input) {
@@ -490,7 +586,19 @@ function offerContains(theme, choice) {
   if (offer.kind === "fallback") {
     return choice.kind === "fallback";
   }
+  if (offer.kind === "parent-one") {
+    return choiceKey({ kind: "parent", id: offer.id }) === key;
+  }
+  if (offer.kind === "custom") {
+    return choice.kind === "custom" && choice.label === offer.label;
+  }
+  if (offer.kind === "quiet") return false;
   return false;
+}
+
+function commitCustom(label, chunkText) {
+  const choice = parseChoice({ kind: "custom", label });
+  return committedTheme(choice, chunkText);
 }
 
 function commitPick(theme, pick, chunkText) {
@@ -572,6 +680,39 @@ function themeView(theme) {
       canOpenParentMenu: false,
     };
   }
+  if (offer.kind === "parent-one") {
+    return {
+      kind: "parent-one",
+      prompt: null,
+      heading: null,
+      headingKey: null,
+      chips: [chipForChoice({ kind: "parent", id: offer.id }, "parent")],
+      highlightedKey,
+      canOpenParentMenu: false,
+    };
+  }
+  if (offer.kind === "custom") {
+    return {
+      kind: "custom",
+      prompt: null,
+      heading: null,
+      headingKey: null,
+      chips: [chipForChoice({ kind: "custom", label: offer.label }, "custom")],
+      highlightedKey,
+      canOpenParentMenu: false,
+    };
+  }
+  if (offer.kind === "quiet") {
+    return {
+      kind: "quiet",
+      prompt: null,
+      heading: null,
+      headingKey: null,
+      chips: [],
+      highlightedKey,
+      canOpenParentMenu: false,
+    };
+  }
   throw new Error("unknown offer");
 }
 
@@ -630,7 +771,14 @@ const exported = {
   childrenOffer,
   askOffer,
   fallbackOffer,
+  TAG_TOP,
+  TAG_MARGIN,
+  TAG_AUTO,
+  gateScores,
+  classifyChunkTags,
   decideOffer,
+  quietOffer,
+  commitCustom,
   proposeTheme,
   commitPick,
   openParentMenu,
